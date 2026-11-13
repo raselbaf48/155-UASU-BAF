@@ -379,10 +379,22 @@ export function getStoredDutyMatrixInternal(): DutyRatioTable[] {
         const existingIds = new Set(updatedParsed.map((t: DutyRatioTable) => t.id));
         const missing = INITIAL_OFFICIAL_DUTY_MATRIX.filter((t) => !existingIds.has(t.id));
         const customDuties = getCustomDuties();
-        const validCustomIds = new Set(customDuties.map(cd => cd.code.toLowerCase() + '_duty'));
+        const validCustomKeys = new Set<string>();
+        customDuties.forEach(cd => {
+          const cLower = cd.code.toLowerCase();
+          validCustomKeys.add(cd.code);
+          validCustomKeys.add(cLower);
+          validCustomKeys.add(cLower + '_duty');
+        });
         const officialIds = new Set(INITIAL_OFFICIAL_DUTY_MATRIX.map(t => t.id));
         
-        let finalMatrix: DutyRatioTable[] = updatedParsed.filter(t => officialIds.has(t.id) || validCustomIds.has(t.id));
+        let finalMatrix: DutyRatioTable[] = updatedParsed.filter(t =>
+          officialIds.has(t.id) ||
+          validCustomKeys.has(t.id) ||
+          validCustomKeys.has(String(t.id || '').toLowerCase()) ||
+          validCustomKeys.has(String(t.dutyCode || '')) ||
+          validCustomKeys.has(String(t.dutyCode || '').toLowerCase())
+        );
         
         if (missing.length > 0) {
           finalMatrix = [...finalMatrix, ...missing];
@@ -434,16 +446,42 @@ export function getStoredDutyMatrixInternal(): DutyRatioTable[] {
           }
         }
         
-        const existingMatrixIds = new Set(finalMatrix.map(t => t.id));
+        const existingMatrixKeys = new Set<string>();
+        finalMatrix.forEach(t => {
+          if (t.id) existingMatrixKeys.add(String(t.id).toLowerCase());
+          if (t.dutyCode) existingMatrixKeys.add(String(t.dutyCode).toLowerCase());
+        });
         customDuties.forEach(cd => {
-           const id = cd.code.toLowerCase() + '_duty';
-           if (!existingMatrixIds.has(id)) {
+           const cLower = cd.code.toLowerCase();
+           const id = cLower + '_duty';
+           const existingTable = finalMatrix.find(t =>
+             t.id === cd.code ||
+             String(t.id || '').toLowerCase() === cLower ||
+             String(t.id || '').toLowerCase() === id ||
+             String(t.dutyCode || '').toLowerCase() === cLower
+           );
+           if (existingTable) {
+             if (existingTable.onParadeOnDutyDay === undefined && cd.onParadeOnDutyDay !== undefined) {
+               existingTable.onParadeOnDutyDay = cd.onParadeOnDutyDay;
+             }
+             if (existingTable.dutyOffNextDay === undefined && cd.dutyOffNextDay !== undefined) {
+               existingTable.dutyOffNextDay = cd.dutyOffNextDay;
+             }
+             if (existingTable.onPtNextDay === undefined && cd.onPtNextDay !== undefined) {
+               existingTable.onPtNextDay = cd.onPtNextDay;
+             }
+           } else if (!existingMatrixKeys.has(id) && !existingMatrixKeys.has(cLower)) {
+               const isEscort = cLower.includes('1794394') || cd.name.toLowerCase().includes('escort');
                finalMatrix.push({
                   id,
                   title: cd.name,
                   dutyCode: cd.code as any,
-                  eligibleFlights: ["Mechanics", "Avionics", "GCS", "Admin"],
-                  eligibleRanks: ["Sgt", "Cpl", "LAC", "AC-1"],
+                  allotmentType: cd.allotmentType || 'ratio',
+                  eligibleFlights: cd.eligibleFlights || ["Mechanics", "Avionics", "GCS", "Admin"],
+                  eligibleRanks: cd.eligibleRanks || ["Sgt", "Cpl", "LAC", "AC-1", "AC-2"],
+                  onParadeOnDutyDay: cd.onParadeOnDutyDay ?? false,
+                  dutyOffNextDay: cd.dutyOffNextDay ?? (isEscort ? true : undefined),
+                  onPtNextDay: cd.onPtNextDay ?? (cd.dutyOffNextDay || isEscort ? true : undefined),
                   totalRequiredMonth: 0,
                   totalRequiredDaily: 0,
                   data: {
@@ -477,14 +515,20 @@ export function getStoredDutyMatrixInternal(): DutyRatioTable[] {
   const baseMatrix = [...INITIAL_OFFICIAL_DUTY_MATRIX];
   const customDuties = getCustomDuties();
   customDuties.forEach(cd => {
-      const id = cd.code.toLowerCase() + '_duty';
-      if (!baseMatrix.find(t => t.id === id)) {
+      const cLower = cd.code.toLowerCase();
+      const id = cLower + '_duty';
+      if (!baseMatrix.find(t => String(t.id || '').toLowerCase() === id || String(t.id || '').toLowerCase() === cLower || String(t.dutyCode || '').toLowerCase() === cLower)) {
+          const isEscort = cLower.includes('1794394') || cd.name.toLowerCase().includes('escort');
           baseMatrix.push({
              id,
              title: cd.name,
              dutyCode: cd.code as any,
-             eligibleFlights: ["Mechanics", "Avionics", "GCS", "Admin"],
-             eligibleRanks: ["Sgt", "Cpl", "LAC", "AC-1"],
+             allotmentType: cd.allotmentType || 'ratio',
+             eligibleFlights: cd.eligibleFlights || ["Mechanics", "Avionics", "GCS", "Admin"],
+             eligibleRanks: cd.eligibleRanks || ["Sgt", "Cpl", "LAC", "AC-1", "AC-2"],
+             onParadeOnDutyDay: cd.onParadeOnDutyDay ?? false,
+             dutyOffNextDay: cd.dutyOffNextDay ?? (isEscort ? true : undefined),
+             onPtNextDay: cd.onPtNextDay ?? (cd.dutyOffNextDay || isEscort ? true : undefined),
              totalRequiredMonth: 0,
              totalRequiredDaily: 0,
              data: {

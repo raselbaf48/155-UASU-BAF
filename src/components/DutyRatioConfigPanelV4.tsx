@@ -166,6 +166,20 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [showExactRatio, setShowExactRatio] = useState(false);
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [recentlyResetDutyId, setRecentlyResetDutyId] = useState<string | null>(null);
+  const [dailyReqInputMode, setDailyReqInputMode] = useState<'tap' | 'stepper'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem('baf_daily_req_input_mode');
+      if (saved === 'stepper' || saved === 'tap') return saved;
+    }
+    return 'tap';
+  });
+
+  const handleDailyReqInputModeChange = (mode: 'tap' | 'stepper') => {
+    setDailyReqInputMode(mode);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('baf_daily_req_input_mode', mode);
+    }
+  };
 
   const handleResetSingleDuty = (dutyId: string) => {
     if (onMatrixChange && matrix) {
@@ -804,7 +818,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                   
                   {/* Modal Header */}
-                  <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+                  <div className="px-5 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap justify-between items-center gap-3 bg-slate-50 dark:bg-slate-800/50">
                     <div>
                       <h3 className="font-bold text-lg text-slate-900 dark:text-white">Configure Daily Requirements</h3>
                       <div className="flex items-center space-x-2 mt-0.5">
@@ -816,56 +830,101 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         </span>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => setSettingsTableIdx(null)}
-                      className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
-                    >
-                      <X className="w-5 h-5 text-slate-500" />
-                    </button>
+
+                    <div className="flex items-center gap-2.5 ml-auto">
+                      {/* Input Mode Toggle: Tap System vs -/+ System */}
+                      <div className="flex items-center bg-slate-200/80 dark:bg-slate-900 p-1 rounded-xl border border-slate-300/80 dark:border-slate-700 shadow-inner">
+                        <button
+                          type="button"
+                          onClick={() => handleDailyReqInputModeChange('tap')}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            dailyReqInputMode === 'tap'
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${dailyReqInputMode === 'tap' ? 'bg-emerald-300' : 'bg-slate-400 dark:bg-slate-600'}`} />
+                          <span>Tap System</span>
+                          <span className={`text-[10px] px-1 py-0.2 rounded font-extrabold ${dailyReqInputMode === 'tap' ? 'bg-white/20 text-white' : 'bg-slate-300/60 dark:bg-slate-800 text-slate-500'}`}>
+                            {dailyReqInputMode === 'tap' ? 'ON' : 'OFF'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDailyReqInputModeChange('stepper')}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            dailyReqInputMode === 'stepper'
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${dailyReqInputMode === 'stepper' ? 'bg-emerald-300' : 'bg-slate-400 dark:bg-slate-600'}`} />
+                          <span>- / + System</span>
+                          <span className={`text-[10px] px-1 py-0.2 rounded font-extrabold ${dailyReqInputMode === 'stepper' ? 'bg-white/20 text-white' : 'bg-slate-300/60 dark:bg-slate-800 text-slate-500'}`}>
+                            {dailyReqInputMode === 'stepper' ? 'ON' : 'OFF'}
+                          </span>
+                        </button>
+                      </div>
+
+                      <button 
+                        type="button"
+                        onClick={() => setSettingsTableIdx(null)}
+                        className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <X className="w-5 h-5 text-slate-500" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Modal Body */}
-                  <div className="p-6 overflow-y-auto">
-                    <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-5 border border-indigo-100 dark:border-indigo-900/50">
+                  <div className="p-5 sm:p-6 overflow-y-auto">
+                    <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-4 sm:p-5 border border-indigo-100 dark:border-indigo-900/50">
                       
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-5 gap-3 pb-4 border-b border-indigo-200/60 dark:border-indigo-800/40">
                         <div>
-                           <h4 className="font-bold text-sm text-indigo-900 dark:text-indigo-300 mb-1">Set Requirement for All Days</h4>
-                           <p className="text-xs text-indigo-700/80 dark:text-indigo-300/70">Applies a default value to the entire month.</p>
+                           <h4 className="font-bold text-sm text-indigo-900 dark:text-indigo-300 mb-0.5">Set Requirement for All Days</h4>
+                           <p className="text-xs text-indigo-700/80 dark:text-indigo-300/70">
+                             {dailyReqInputMode === 'tap'
+                               ? 'Tap System ON: Click any day box below to cycle (0 → 1 → 2 → 3 → 0).'
+                               : '- / + System ON: Use - and + buttons on each day box to adjust count.'}
+                           </p>
                         </div>
-                        <div className="flex flex-col space-y-2">
-                          <div className="flex items-center bg-white dark:bg-slate-800 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-fit">
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <div className="flex items-center bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
                             <button 
+                              type="button"
                               onClick={() => {
                                 const input = document.getElementById('panelGlobalReqInput') as HTMLInputElement;
                                 let val = parseInt(input.value, 10);
                                 if (isNaN(val)) val = 0;
                                 if (val > 0) input.value = (val - 1).toString();
                               }}
-                              className="w-8 h-8 flex items-center justify-center rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-colors"
                             >
-                              <Minus className="w-4 h-4" />
+                              <Minus className="w-3.5 h-3.5" />
                             </button>
                             <input 
                               type="text"
                               readOnly
                               id="panelGlobalReqInput"
-                              className="w-12 px-1 py-1 text-base font-bold font-mono text-center bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100"
+                              className="w-10 px-1 py-0.5 text-sm font-bold font-mono text-center bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100"
                               defaultValue={matrix[settingsTableIdx]?.totalRequiredDaily || 0}
                             />
                             <button 
+                              type="button"
                               onClick={() => {
                                 const input = document.getElementById('panelGlobalReqInput') as HTMLInputElement;
                                 let val = parseInt(input.value, 10);
                                 if (isNaN(val)) val = 0;
                                 input.value = (val + 1).toString();
                               }}
-                              className="w-8 h-8 flex items-center justify-center rounded-md bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 transition-colors"
                             >
-                              <Plus className="w-4 h-4" />
+                              <Plus className="w-3.5 h-3.5" />
                             </button>
                           </div>
                           <button 
+                            type="button"
                             onClick={() => {
                               const val = parseInt((document.getElementById('panelGlobalReqInput') as HTMLInputElement).value, 10);
                               if (isNaN(val)) return;
@@ -879,71 +938,123 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                 pushDutyListToCloud(updated).catch(console.warn);
                               }
                             }}
-                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm w-full sm:w-auto"
+                            className="px-3.5 py-2 bg-indigo-600 text-white text-xs sm:text-sm font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm whitespace-nowrap"
                           >
                             Apply to All
                           </button>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
+                      <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2.5 sm:gap-3">
                         {Array.from({ length: 31 }, (_, i) => i + 1).map((dayNum, idx) => {
                           const table = matrix[settingsTableIdx];
-                          let req = table?.dailyRequirements?.[idx];
-                          if (req === undefined && table) {
+                          const resolveDayReq = (dayIndex: number): number => {
+                            const explicit = table?.dailyRequirements?.[dayIndex];
+                            if (explicit !== undefined && explicit !== null) return Number(explicit) || 0;
+                            if (table) {
                               if (table.totalRequiredDaily && (table.totalRequiredDaily * 31 === table.totalRequiredMonth)) {
-                                  req = table.totalRequiredDaily;
-                              } else {
-                                  req = ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((acc, fl) => acc + (table.data[fl as FlightName]?.[idx] || 0), 0);
+                                return table.totalRequiredDaily;
                               }
-                          }
-                          return (
-                            <div key={dayNum} className="flex flex-col items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 shadow-sm w-full max-w-[120px] mx-auto">
-                              <label className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Day {dayNum}</label>
-                              <div className="flex items-center justify-between w-full px-1">
-                                <button 
-                                  onClick={() => {
-                                    if (onMatrixChange) {
-                                      const updated = [...matrix];
-                                      updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
-                                      const currentReqs = updated[settingsTableIdx].dailyRequirements ? [...updated[settingsTableIdx].dailyRequirements!] : new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
-                                      if (currentReqs[idx] > 0) {
-                                        currentReqs[idx] -= 1;
-                                        updated[settingsTableIdx].dailyRequirements = currentReqs;
-                                        updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
-                                        updated[settingsTableIdx].totalRequiredDaily = Math.max(...currentReqs);
-                                        onMatrixChange(updated);
-                                        pushDutyListToCloud(updated).catch(console.warn);
-                                      }
-                                    }
-                                  }}
-                                  className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 transition-colors"
-                                >
-                                  <Minus className="w-4 h-4" />
-                                </button>
-                                <span className="font-mono font-bold text-lg text-slate-800 dark:text-slate-200 w-8 text-center select-none flex-shrink-0">
-                                  {req}
-                                </span>
-                                <button 
-                                  onClick={() => {
-                                    if (onMatrixChange) {
-                                      const updated = [...matrix];
-                                      updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
-                                      const currentReqs = updated[settingsTableIdx].dailyRequirements ? [...updated[settingsTableIdx].dailyRequirements!] : new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
-                                      currentReqs[idx] += 1;
-                                      updated[settingsTableIdx].dailyRequirements = currentReqs;
-                                      updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
-                                      updated[settingsTableIdx].totalRequiredDaily = Math.max(...currentReqs);
-                                      onMatrixChange(updated);
-                                      pushDutyListToCloud(updated).catch(console.warn);
-                                    }
-                                  }}
-                                  className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 text-indigo-600 dark:text-indigo-400 transition-colors"
-                                >
-                                  <Plus className="w-4 h-4" />
-                                </button>
+                              return ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce(
+                                (acc, fl) => acc + (table.data[fl as FlightName]?.[dayIndex] || 0),
+                                0
+                              );
+                            }
+                            return 0;
+                          };
+
+                          const req = resolveDayReq(idx);
+                          const updateDayValue = (newValue: number) => {
+                            if (!onMatrixChange) return;
+                            const updated = [...matrix];
+                            updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
+                            const currentReqs = updated[settingsTableIdx].dailyRequirements
+                              ? [...updated[settingsTableIdx].dailyRequirements!]
+                              : Array.from({ length: 31 }, (_, dIdx) => resolveDayReq(dIdx));
+                            currentReqs[idx] = Math.max(0, newValue);
+                            updated[settingsTableIdx].dailyRequirements = currentReqs;
+                            updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + (Number(b) || 0), 0);
+                            updated[settingsTableIdx].totalRequiredDaily = Math.max(...currentReqs);
+                            onMatrixChange(updated);
+                            pushDutyListToCloud(updated).catch(console.warn);
+                          };
+
+                          const stateStyle =
+                            req === 0
+                              ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/80 text-slate-400 dark:text-slate-500 hover:border-indigo-400 dark:hover:border-indigo-500/70'
+                              : req === 1
+                              ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-500/80 text-indigo-700 dark:text-indigo-200 shadow-indigo-500/10'
+                              : req === 2
+                              ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-500/80 text-emerald-700 dark:text-emerald-200 shadow-emerald-500/10'
+                              : 'bg-amber-50 dark:bg-amber-950/50 border-amber-400 dark:border-amber-500/80 text-amber-700 dark:text-amber-200 shadow-amber-500/10';
+
+                          const badgeDot =
+                            req === 0
+                              ? 'bg-slate-300 dark:bg-slate-700'
+                              : req === 1
+                              ? 'bg-indigo-500'
+                              : req === 2
+                              ? 'bg-emerald-500'
+                              : 'bg-amber-500';
+
+                          if (dailyReqInputMode === 'stepper') {
+                            return (
+                              <div
+                                key={dayNum}
+                                className={`flex flex-col items-center justify-center rounded-xl border-2 py-2 px-1.5 shadow-sm transition-all w-full ${stateStyle}`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <span className={`w-1.5 h-1.5 rounded-full transition-colors ${badgeDot}`} />
+                                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">
+                                    Day {dayNum}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between w-full gap-1 px-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (req > 0) updateDayValue(req - 1);
+                                    }}
+                                    className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <span className="font-mono font-black text-lg text-slate-800 dark:text-slate-100 text-center select-none flex-1">
+                                    {req}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateDayValue(req + 1)}
+                                    className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 transition-colors cursor-pointer"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
-                            </div>
+                            );
+                          }
+
+                          return (
+                            <button
+                              key={dayNum}
+                              type="button"
+                              title={`Day ${dayNum}: Click to cycle (0 → 1 → 2 → 3 → 0)`}
+                              onClick={() => {
+                                const nextVal = req >= 3 ? 0 : req + 1;
+                                updateDayValue(nextVal);
+                              }}
+                              className={`group relative flex flex-col items-center justify-center rounded-xl border-2 py-2.5 px-2 shadow-sm transition-all duration-150 cursor-pointer select-none active:scale-95 hover:shadow-md w-full ${stateStyle}`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`w-1.5 h-1.5 rounded-full transition-colors ${badgeDot}`} />
+                                <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">
+                                  Day {dayNum}
+                                </span>
+                              </div>
+                              <span className="font-mono font-black text-2xl leading-none tracking-tight">
+                                {req}
+                              </span>
+                            </button>
                           );
                         })}
                       </div>

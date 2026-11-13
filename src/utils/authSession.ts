@@ -1,4 +1,5 @@
-import { supabase, isSupabaseConfigured } from '../supabase';
+import { isFirebaseConfigured, isFirestoreQuotaExceeded } from '../firebase';
+import { fetchUserProfilesFromFirebase, fetchCanteenMembersFromFirebase } from '../services/firebaseFirestoreService';
 import { localDb } from '../services/localDatabase';
 import { logUserLogin, updatePresence } from '../services/presenceService';
 import { Airman, DetailedUserLogin, UserLoginRole, UserLoginStatus } from '../types';
@@ -261,54 +262,6 @@ export const saveDetailedUsers = (users: DetailedUserLogin[]): void => {
     
     (localDb as any).db.detailedUsers = users;
     localDb.forceSave();
-
-    // Async sync to Supabase
-    (async () => {
-      try {
-        const rawPayload = users
-          .filter(u => u && u.bdNo)
-          .map(u => {
-            const cleanBd = String(u.bdNo || '').replace(/^BD\/?/i, '').trim();
-            const name = (u.name && String(u.name).trim() !== '') ? String(u.name).trim() : (cleanBd ? `Airman ${cleanBd}` : 'Airman');
-            const userPin = (u.password && String(u.password).trim() !== '' && !isNaN(Number(u.password))) ? Number(u.password) : null;
-            const adminPin = (u.adminPass && String(u.adminPass).trim() !== '' && !isNaN(Number(u.adminPass))) ? Number(u.adminPass) : null;
-            return {
-              'User ID': cleanBd,
-              airman_id: u.airmanId || null,
-              'Name': name,
-              'Rank': u.rank || null,
-              'Flight': u.flightName || null,
-              'Trade': u.trade || null,
-              'Role': u.role || 'USER',
-              'User Login PIN': userPin,
-              'Admin Login PIN': adminPin,
-              'Status': u.status || 'ACTIVE',
-              detail_order: u.detailOrder || null
-            };
-          })
-          .filter(u => u['User ID'] && u['User ID'].toLowerCase() !== 'deleted_admin');
-        
-        // Deduplicate on User ID
-        const uniqueMap = new Map();
-        rawPayload.forEach(p => uniqueMap.set(p['User ID'].toLowerCase(), p));
-        const supaPayload = Array.from(uniqueMap.values());
-        
-        // Upsert users to Supabase
-        if (isSupabaseConfigured && supaPayload.length > 0) {
-          const { error } = await supabase.from('user_profiles').upsert(supaPayload, { onConflict: 'User ID' });
-          if (error) {
-            if (error.message?.includes('Failed to fetch') || (error as any)?.details?.includes('Failed to fetch')) {
-              console.warn("Supabase sync currently offline or blocked; local changes preserved.");
-            } else {
-              console.warn("Supabase user sync notice:", error.message || error);
-            }
-          }
-        }
-      } catch (err: any) {
-        console.warn("Supabase async sync notice:", err?.message || err);
-      }
-    })();
-
   } catch (e) {
     console.error('Failed to save detailed user logins:', e);
   }
@@ -407,12 +360,6 @@ export const removeDetailedUser = (bdNo: string): void => {
   const current = getDetailedUsers();
   const filtered = current.filter((u) => u.bdNo.toLowerCase() !== clean);
   saveDetailedUsers(filtered);
-  // Async delete from Supabase
-  if (isSupabaseConfigured) {
-    supabase.from('user_profiles').delete().eq('User ID', clean).then(({ error }) => {
-      if (error) console.error("Error deleting user from Supabase:", error);
-    });
-  }
 };
 
 /**
@@ -587,20 +534,6 @@ export const validateUserLogin = async (
       matchedDetail.lastLoginAt = new Date().toISOString();
       saveDetailedUsers(detailedList);
 
-      // Non-blocking background sync with Supabase
-      if (isSupabaseConfigured) {
-        (async () => {
-          try {
-            await supabase
-              .from('user_profiles')
-              .update({ last_login_at: new Date().toISOString() })
-              .eq('User ID', cleanInput);
-          } catch (e) {
-            // silent catch
-          }
-        })();
-      }
-
       return {
         success: true,
         airman,
@@ -611,88 +544,101 @@ export const validateUserLogin = async (
   }
 
 
-  // 3. Cloud Fallback: Supabase (if local check failed or PIN was updated on another device)
+  // 3. Cloud Fallback: Firebase Firestore (if local check failed or PIN was updated on another device)
   try {
-    if (isSupabaseConfigured) {
-      const fetchPromise = supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('User ID', cleanInput)
-        .single();
-        
-      // Max 1.2s timeout so the UI never hangs
-      const timeoutPromise = new Promise<{ data: null; error: any }>((resolve) => 
-        setTimeout(() => resolve({ data: null, error: new Error('Timeout') }), 1200)
+    if (isFirebaseConfigured && !isFirestoreQuotaExceeded()) {
+      const fetchPromise = fetchUserProfilesFromFirebase();
+      const timeoutPromise = new Promise<any[]>((resolve) =>
+        setTimeout(() => resolve([]), 1500)
       );
 
-      const { data: supaUser, error: supaErr } = await Promise.race([fetchPromise, timeoutPromise]);
-        
-      if (supaUser) {
-        if (supaUser['Status'] === 'DISABLED') {
+      const fbUsers = await Promise.race([fetchPromise, timeoutPromise]);
+      const fbUser = fbUsers.find((u: any) => {
+        const uBd = String(u.bdNo || '').trim().replace(/^BD\/?/i, '').toLowerCase();
+        const uDigits = uBd.replace(/\D/g, '');
+        return uBd === cleanInput || (cleanDigits && uDigits === cleanDigits);
+      });
+
+      if (fbUser) {
+        if (fbUser.status === 'DISABLED') {
           return { success: false, message: 'You are not authorized to access the portal. User ID is disabled. Please contact administrator.' };
         }
-        if (supaUser['Status'] === 'SUSPENDED') {
+        if (fbUser.status === 'SUSPENDED') {
           return { success: false, message: 'You are not authorized to access the portal. User ID is temporarily suspended.' };
         }
-        
-        const expectedPassword = supaUser['User Login PIN']?.toString() || supaUser.password || supaUser['User ID'];
+
+        const expectedPassword = (fbUser.password || fbUser.bdNo || '').toString().trim();
         const rawProvided = (passwordInput || '').trim();
-        const isMatch = 
-          rawProvided === expectedPassword?.toString().trim() ||
+        const isMatch =
+          rawProvided === expectedPassword ||
           rawProvided === cleanDigits ||
           rawProvided === '1124';
 
         if (!isMatch) {
-           return { success: false, message: `Invalid User ID or PIN.` };
+          return { success: false, message: 'Invalid User ID or PIN.' };
         }
-        
-        const mappedUser: DetailedUserLogin = {
-          id: supaUser.id || `user-${supaUser['User ID']}`,
-          airmanId: supaUser.airman_id || 'unknown',
-          bdNo: supaUser['User ID'],
-          rank: supaUser['Rank'] || '',
-          name: supaUser['Name'] || '',
-          flightName: supaUser['Flight'] || '',
-          trade: supaUser['Trade'] || '',
-          role: supaUser['Role'] as UserLoginRole,
-          password: expectedPassword,
-          status: supaUser['Status'] as UserLoginStatus,
-          detailOrder: supaUser.detail_order || '',
-          detailedAt: supaUser.created_at || new Date().toISOString(),
-          detailedBy: 'Supabase'
-        };
-        
-        let nominalMatch = nominalAirmen.find(a => a.id === supaUser.airman_id || a.bdNo.toLowerCase() === cleanInput);
-        
-        if (!nominalMatch) {
-           nominalMatch = {
-             id: (supaUser.airman_id && supaUser.airman_id !== "airman-undefined") ? supaUser.airman_id : `airman-${supaUser['User ID'] && supaUser['User ID'] !== "undefined" ? supaUser['User ID'] : Math.random().toString(36).slice(2, 10)}`,
-             serNo: 99,
-             code: `${supaUser['Rank'] || ''}-${(supaUser['Name'] || '').slice(0, 3).toUpperCase()}`,
-             bdNo: `BD/${supaUser['User ID']}`,
-             rank: supaUser['Rank'] as any,
-             name: supaUser['Name'] || '',
-             trade: supaUser['Trade'] || 'General',
-             addressBlock: '155 UASU',
-             mobileNo: '',
-             flightName: supaUser['Flight'] as any || 'Admin',
-             remarks: '',
-             active: true,
-           };
-        }
-        
-        return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${supaUser['Rank']} ${supaUser['Name']}` };
-      } else {
-        // Fallback: check Canteen_Member table in Supabase
-        const { data: cMem } = await supabase
-          .from('Canteen_Member')
-          .select('*')
-          .or(`"BD No".eq.${cleanInput},"BD No".eq.BD/${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
-          .limit(1);
 
-        if (cMem && cMem.length > 0) {
-          const cm = cMem[0];
-          const cleanBdNo = String(cm['BD No'] || cleanInput).replace(/\D/g, '');
+        const mappedUser: DetailedUserLogin = {
+          id: fbUser.id || `user-${fbUser.bdNo}`,
+          airmanId: fbUser.airmanId || 'unknown',
+          bdNo: fbUser.bdNo,
+          rank: fbUser.rank || '',
+          name: fbUser.name || '',
+          flightName: fbUser.flightName || '',
+          trade: fbUser.trade || '',
+          role: (fbUser.role as UserLoginRole) || 'USER',
+          password: expectedPassword,
+          adminPass: fbUser.adminPass,
+          status: (fbUser.status as UserLoginStatus) || 'ACTIVE',
+          detailOrder: fbUser.detailOrder || '',
+          detailedAt: fbUser.detailedAt || new Date().toISOString(),
+          detailedBy: fbUser.detailedBy || 'Firebase',
+          updatedAt: fbUser.updatedAt,
+        };
+
+        let nominalMatch = nominalAirmen.find(
+          (a) => a.id === fbUser.airmanId || a.bdNo.replace(/^BD\/?/i, '').toLowerCase() === cleanInput
+        );
+
+        if (!nominalMatch) {
+          nominalMatch = {
+            id:
+              fbUser.airmanId && fbUser.airmanId !== 'airman-undefined'
+                ? fbUser.airmanId
+                : `airman-${fbUser.bdNo && fbUser.bdNo !== 'undefined' ? fbUser.bdNo : Math.random().toString(36).slice(2, 10)}`,
+            serNo: 99,
+            code: `${fbUser.rank || ''}-${(fbUser.name || '').slice(0, 3).toUpperCase()}`,
+            bdNo: `BD/${fbUser.bdNo}`,
+            rank: fbUser.rank as any,
+            name: fbUser.name || '',
+            trade: fbUser.trade || 'General',
+            addressBlock: '155 UASU',
+            mobileNo: fbUser.mobileNo || '',
+            flightName: (fbUser.flightName as any) || 'Admin',
+            remarks: '',
+            active: true,
+          };
+        }
+
+        return {
+          success: true,
+          airman: nominalMatch,
+          detailedUser: mappedUser,
+          message: `Access granted for ${fbUser.rank} ${fbUser.name}`,
+        };
+      } else {
+        // Fallback: check canteen_members in Firestore
+        const memPromise = fetchCanteenMembersFromFirebase();
+        const memTimeout = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1500));
+        const fbMembers = await Promise.race([memPromise, memTimeout]);
+        const cm = fbMembers.find((m: any) => {
+          const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
+          const mAid = String(m.airman_id || '').replace(/^airman-/i, '').toLowerCase();
+          return (cleanDigits && mBd === cleanDigits) || mBd === cleanInput || mAid === cleanInput;
+        });
+
+        if (cm) {
+          const cleanBdNo = String(cm['BD No'] || cm.bdNo || cleanInput).replace(/\D/g, '');
           const expectedPassword = cleanBdNo;
           const rawProvided = (passwordInput || '').trim();
           if (rawProvided === expectedPassword || rawProvided === '1124') {
@@ -709,7 +655,7 @@ export const validateUserLogin = async (
               status: 'ACTIVE',
               detailOrder: `DO-155/MEMBER/${cleanBdNo}`,
               detailedAt: new Date().toISOString(),
-              detailedBy: 'Canteen Member DB'
+              detailedBy: 'Firebase Canteen Member DB',
             };
             const nominalMatch: Airman = {
               id: cm.airman_id || `airman-${cleanBdNo}`,
@@ -725,13 +671,18 @@ export const validateUserLogin = async (
               remarks: '',
               active: true,
             };
-            return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${cm.Rank} ${cm.Surname}` };
+            return {
+              success: true,
+              airman: nominalMatch,
+              detailedUser: mappedUser,
+              message: `Access granted for ${cm.Rank} ${cm.Surname}`,
+            };
           }
         }
       }
     }
-  } catch(e) {
-    console.error("Supabase login check failed, falling back to local DB", e);
+  } catch (e) {
+    console.warn('Firebase login check fallback to local DB:', e);
   }
 
   // If user was registered in detailed users but credentials failed local and cloud checks
@@ -834,7 +785,8 @@ export const setUserSession = (airman: Airman, assignedRole: UserLoginRole = 'US
  */
 export const clearUserSession = (): void => {
   try {
-    
+    // Flush any pending unsynced single-user / multi-user edits to Firebase before closing session
+    window.dispatchEvent(new CustomEvent('baf_before_user_logout'));
     const session = getCurrentUserSession();
     if (session) {
       updatePresence(session.bdNo, true, ''); // logout
@@ -897,8 +849,8 @@ export const recordLoginLog = async (airman: Airman, role: string = 'USER'): Pro
       window.dispatchEvent(new CustomEvent('baf_login_history_updated', { detail: cachedLoginHistory }));
     }
 
-    // Sync to Supabase app_settings if configured
-    if (isSupabaseConfigured) {
+    // Sync to Firebase app_settings if configured
+    if (isFirebaseConfigured) {
       localDb.syncSettingToCloud('baf_user_login_history', JSON.stringify(cachedLoginHistory.slice(0, 100))).catch(() => {});
     }
   } catch (e) {
@@ -916,7 +868,7 @@ export const clearLoginHistory = async (): Promise<void> => {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('baf_login_history_updated', { detail: [] }));
     }
-    if (isSupabaseConfigured) {
+    if (isFirebaseConfigured) {
       localDb.syncSettingToCloud('baf_user_login_history', JSON.stringify([])).catch(() => {});
     }
   } catch (e) {

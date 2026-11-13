@@ -7,19 +7,9 @@ import {
   HardDrive,
   CheckCircle2,
   AlertTriangle,
-  Database,
-  Users,
-  Calendar,
-  FileSpreadsheet,
-  Clock,
-  FileText,
-  Save,
-  RotateCcw,
-  Trash2,
-  History,
-  FileCheck,
-  Check,
   X,
+  Cloud,
+  CloudOff,
 } from 'lucide-react';
 import { Logo155UASU } from './Logo155UASU';
 import {
@@ -27,218 +17,188 @@ import {
   downloadOfflineBackupJson,
   exportFullSystemData,
 } from '../services/googleDriveService';
-import { localDb } from '../services/localDatabase';
-
-export interface RestoreHistoryItem {
-  id: string;
-  timestamp: string;
-  actionType: 'FILE_RESTORE' | 'SNAPSHOT_RESTORE' | 'SNAPSHOT_SAVE' | 'FILE_BACKUP';
-  title: string;
-  details: string;
-  airmenCount?: number;
-  assignmentsCount?: number;
-  membersCount?: number;
-  fileName?: string;
-  status: 'SUCCESS' | 'ERROR';
-}
-
-const HISTORY_STORAGE_KEY = 'baf_backup_restore_history_v1';
-
-function getInitialHistory(): RestoreHistoryItem[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return [];
-}
+import {
+  localDb,
+  getSyncLogs,
+  clearSyncLogs,
+  addSyncLog,
+  getLocalCloudSyncLogs,
+  addLocalCloudSyncLog,
+  clearLocalCloudSyncLogs,
+  getFirebaseSyncState,
+} from '../services/localDatabase';
+import { isFirebaseConfigured, isFirestoreQuotaExceeded } from '../firebase';
+import {
+  getPendingDeltaCount,
+  probeFirebaseConnectionAndQuota,
+} from '../services/firebaseFirestoreService';
+import { getActiveUsersCount } from '../services/presenceService';
+import {
+  getCanteenSyncLogs,
+  clearCanteenSyncLogs,
+  performCanteenBackup,
+  pullAllCanteenDataFromCloud,
+} from '../features/canteen/utils/canteenCloudSync';
 
 interface StandaloneBackupPageProps {
   onBack: () => void;
 }
 
+type CloudModeTab = 'LOCAL' | 'FIREBASE';
+
 export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBack }) => {
+  const [activeCloudTab, setActiveCloudTab] = useState<CloudModeTab>(() =>
+    isFirestoreQuotaExceeded() || !isFirebaseConfigured ? 'LOCAL' : 'FIREBASE'
+  );
+
   const [isLoading, setIsLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
 
-  // Confirmation state for File Restore
+  // Shared Cloud Action Progress state
+  const [cloudActionStatus, setCloudActionStatus] = useState<'' | 'Uploading...' | 'Downloading...'>('');
+  const [syncProgress, setSyncProgress] = useState<number>(0);
+  const [syncActionMessage, setSyncActionMessage] = useState<string>('');
+
+  // Confirmation & Circle Percentage Progress state for File Restore
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [pendingRestoreData, setPendingRestoreData] = useState<any>(null);
   const [pendingFileName, setPendingFileName] = useState<string>('');
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState(0);
+  const [restoreStage, setRestoreStage] = useState('');
 
-  // Clear all confirmation modal
-  const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
+  // Live Status & Strictly Separated Logs
+  const [cloudState, setCloudState] = useState(() => getFirebaseSyncState());
+  const [quotaExceeded, setQuotaExceeded] = useState(() => isFirestoreQuotaExceeded());
+  const [pendingCount, setPendingCount] = useState(() => getPendingDeltaCount());
+  const [activeUsers, setActiveUsers] = useState(() => getActiveUsersCount());
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
 
-  // Restore & Backup History
-  const [historyList, setHistoryList] = useState<RestoreHistoryItem[]>(() => getInitialHistory());
+  const [firebaseLogs, setFirebaseLogs] = useState(() =>
+    [
+      ...getSyncLogs().map((l) => ({ ...l, scope: 'Office / Duty' as const })),
+      ...getCanteenSyncLogs().map((l) => ({ ...l, scope: 'Canteen' as const })),
+    ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  );
 
-  // Save history to localStorage permanently (never auto-deletes)
-  const saveHistoryList = (list: RestoreHistoryItem[]) => {
-    setHistoryList(list);
-    try {
-      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(list));
-    } catch (e) {
-      console.warn('Failed to save restore history to localStorage:', e);
-    }
-  };
+  const [localCloudLogs, setLocalCloudLogs] = useState(() =>
+    [...getLocalCloudSyncLogs()].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+  );
 
-  const addHistoryItem = (item: Omit<RestoreHistoryItem, 'id'>) => {
-    const newItem: RestoreHistoryItem = {
-      ...item,
-      id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    };
-    const updated = [newItem, ...historyList];
-    saveHistoryList(updated);
-  };
-
-  const deleteHistoryItem = (id: string) => {
-    const updated = historyList.filter((item) => item.id !== id);
-    saveHistoryList(updated);
-    setSuccessMessage('হিস্ট্রি এন্ট্রি সফলভাবে মুছে ফেলা হয়েছে।');
-    setTimeout(() => setSuccessMessage(''), 3000);
-  };
-
-  const handleClearAllHistory = () => {
-    saveHistoryList([]);
-    setShowClearHistoryConfirm(false);
-    setSuccessMessage('সমস্ত রিস্টোর হিস্ট্রি স্থায়ীভাবে মুছে ফেলা হয়েছে।');
-    setTimeout(() => setSuccessMessage(''), 3000);
-  };
-
-  // Live system stats
-  const [systemStats, setSystemStats] = useState<{
-    airmenCount: number;
-    assignmentsCount: number;
-    canteenMembersCount: number;
-    canteenTransactionsCount: number;
-    lastSavedTime?: string;
-  }>({
-    airmenCount: 48,
-    assignmentsCount: 4200,
-    canteenMembersCount: 66,
-    canteenTransactionsCount: 180,
-    lastSavedTime: localStorage.getItem('baf_local_snapshot_time') || undefined,
-  });
-
-  const refreshStats = async () => {
-    try {
-      const data = await exportFullSystemData();
-      setSystemStats({
-        airmenCount: data.baf_unit_data?.airmen?.length || 48,
-        assignmentsCount: Object.values(data.baf_unit_data?.assignments || {}).reduce(
-          (acc: number, list: any) => acc + (list?.length || 0),
-          0
-        ),
-        canteenMembersCount: data.canteen?.members?.length || 66,
-        canteenTransactionsCount: data.canteen?.transactions?.length || 180,
-        lastSavedTime: localStorage.getItem('baf_local_snapshot_time') || undefined,
-      });
-    } catch {
-      const curDb = localDb.getDb();
-      setSystemStats({
-        airmenCount: curDb.airmen?.length || 48,
-        assignmentsCount: Object.values(curDb.assignments || {}).reduce(
-          (acc: number, list: any) => acc + (list?.length || 0),
-          0
-        ),
-        canteenMembersCount: 66,
-        canteenTransactionsCount: 180,
-        lastSavedTime: localStorage.getItem('baf_local_snapshot_time') || undefined,
-      });
-    }
+  const refreshCloudStatusAndLogs = () => {
+    setCloudState(getFirebaseSyncState());
+    setQuotaExceeded(isFirestoreQuotaExceeded());
+    setPendingCount(getPendingDeltaCount());
+    setActiveUsers(getActiveUsersCount());
+    setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true);
+    setFirebaseLogs(
+      [
+        ...getSyncLogs().map((l) => ({ ...l, scope: 'Office / Duty' as const })),
+        ...getCanteenSyncLogs().map((l) => ({ ...l, scope: 'Canteen' as const })),
+      ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    );
+    setLocalCloudLogs(
+      [...getLocalCloudSyncLogs()].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      )
+    );
   };
 
   useEffect(() => {
-    refreshStats();
-  }, []);
+    refreshCloudStatusAndLogs();
 
-  // Action: Download Local JSON File
-  const handleDownloadLocalJson = async () => {
-    setIsLoading(true);
-    setStatusMessage('ডাটাবেজ ফাইল প্রস্তুত হচ্ছে...');
+    const onSyncProgress = (e: any) => {
+      const pct = Number(e?.detail?.percentage);
+      const msg = e?.detail?.message;
+      if (!isNaN(pct) && cloudActionStatus) {
+        setSyncProgress(pct);
+      }
+      if (msg && cloudActionStatus) {
+        setSyncActionMessage(String(msg));
+      }
+    };
+
+    window.addEventListener('d1_sync_update', refreshCloudStatusAndLogs);
+    window.addEventListener('baf_sync_logs_updated', refreshCloudStatusAndLogs);
+    window.addEventListener('baf_local_cloud_logs_updated', refreshCloudStatusAndLogs);
+    window.addEventListener('canteen_sync_logs_updated', refreshCloudStatusAndLogs);
+    window.addEventListener('baf_firebase_quota_status', refreshCloudStatusAndLogs);
+    window.addEventListener('baf_pending_delta_updated', refreshCloudStatusAndLogs);
+    window.addEventListener('baf_active_users_changed', refreshCloudStatusAndLogs);
+    window.addEventListener('baf_sync_progress', onSyncProgress);
+    window.addEventListener('online', refreshCloudStatusAndLogs);
+    window.addEventListener('offline', refreshCloudStatusAndLogs);
+
+    return () => {
+      window.removeEventListener('d1_sync_update', refreshCloudStatusAndLogs);
+      window.removeEventListener('baf_sync_logs_updated', refreshCloudStatusAndLogs);
+      window.removeEventListener('baf_local_cloud_logs_updated', refreshCloudStatusAndLogs);
+      window.removeEventListener('canteen_sync_logs_updated', refreshCloudStatusAndLogs);
+      window.removeEventListener('baf_firebase_quota_status', refreshCloudStatusAndLogs);
+      window.removeEventListener('baf_pending_delta_updated', refreshCloudStatusAndLogs);
+      window.removeEventListener('baf_active_users_changed', refreshCloudStatusAndLogs);
+      window.removeEventListener('baf_sync_progress', onSyncProgress);
+      window.removeEventListener('online', refreshCloudStatusAndLogs);
+      window.removeEventListener('offline', refreshCloudStatusAndLogs);
+    };
+  }, [cloudActionStatus]);
+
+  // LOCAL CLOUD ACTION 1: Backup (Downloads Offline .json Backup File + Logs to Local Cloud)
+  const handleLocalOfflineBackup = async () => {
+    if (cloudActionStatus || isLoading) return;
     setErrorMessage('');
     setSuccessMessage('');
-    try {
-      await downloadOfflineBackupJson();
-      const now = new Date().toISOString();
-      localStorage.setItem('baf_local_snapshot_time', now);
-      setSuccessMessage('ব্যাকআপ ফাইল (.json) সফলভাবে ডাউনলোড সম্পন্ন হয়েছে!');
+    setCloudActionStatus('Uploading...');
+    setSyncProgress(25);
+    setSyncActionMessage('Preparing offline backup file (.json)...');
 
-      addHistoryItem({
-        timestamp: now,
-        actionType: 'FILE_BACKUP',
-        title: 'অফলাইন ব্যাকআপ ডাউনলোড (.json)',
-        details: `${systemStats.airmenCount} জন এয়ারম্যান, ${systemStats.assignmentsCount.toLocaleString()}টি রোস্টার অ্যাসাইনমেন্ট ও ক্যান্টিন ডাটা সংরক্ষিত হয়েছে`,
-        airmenCount: systemStats.airmenCount,
-        assignmentsCount: systemStats.assignmentsCount,
-        membersCount: systemStats.canteenMembersCount,
-        fileName: '155_UASU_BAF_Backup.json',
-        status: 'SUCCESS',
-      });
-
-      refreshStats();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'ব্যাকআপ ডাউনলোড ব্যর্থ হয়েছে');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Action: Save Instant Snapshot in LocalStorage
-  const handleCreateLocalSnapshot = async () => {
-    setIsLoading(true);
-    setStatusMessage('লোকাল সেভপয়েন্ট সংরক্ষিত হচ্ছে...');
-    setErrorMessage('');
-    setSuccessMessage('');
     try {
       const data = await exportFullSystemData();
-      const now = new Date().toISOString();
-      localStorage.setItem('baf_local_storage_snapshot', JSON.stringify(data));
-      localStorage.setItem('baf_local_snapshot_time', now);
-      setSuccessMessage('ব্রাউজার লোকাল স্টোরেজে সেভপয়েন্ট সংরক্ষিত হয়েছে!');
+      const airmenCount = data.baf_unit_data?.airmen?.length || localDb.getDb().airmen?.length || 0;
+      const assignmentsCount = Object.values(data.baf_unit_data?.assignments || {}).reduce(
+        (acc: number, list: any) => acc + (list?.length || 0),
+        0
+      );
 
-      addHistoryItem({
+      setSyncProgress(70);
+      await downloadOfflineBackupJson();
+
+      const now = new Date().toISOString();
+      localStorage.setItem('baf_local_snapshot_time', now);
+
+      addLocalCloudSyncLog({
         timestamp: now,
-        actionType: 'SNAPSHOT_SAVE',
-        title: 'তাত্ক্ষণিক সেভপয়েন্ট সংরক্ষণ',
-        details: `${systemStats.airmenCount} জন এয়ারম্যান, ${systemStats.assignmentsCount.toLocaleString()}টি অ্যাসাইনমেন্ট সংরক্ষিত`,
-        airmenCount: systemStats.airmenCount,
-        assignmentsCount: systemStats.assignmentsCount,
-        membersCount: systemStats.canteenMembersCount,
+        type: 'PUSH',
         status: 'SUCCESS',
+        message: `Offline backup (.json) downloaded: ${airmenCount} Airmen, ${assignmentsCount.toLocaleString()} Duty Records, Duty Settings & Preferences.`,
       });
 
-      refreshStats();
+      setSyncProgress(100);
+      setSyncActionMessage('Backup Downloaded!');
+      setSuccessMessage('অফলাইন ব্যাকআপ ফাইল (.json) সফলভাবে ডাউনলোড হয়েছে!');
+      refreshCloudStatusAndLogs();
     } catch (err: any) {
-      setErrorMessage('সেভপয়েন্ট সংরক্ষণ ব্যর্থ হয়েছে: ' + (err.message || 'অজানা ত্রুটি'));
+      addLocalCloudSyncLog({
+        timestamp: new Date().toISOString(),
+        type: 'PUSH',
+        status: 'ERROR',
+        message: `Offline backup failed: ${err?.message || 'Unknown error'}`,
+      });
+      setSyncActionMessage('Backup Failed!');
+      setErrorMessage(err?.message || 'Backup download failed.');
+      refreshCloudStatusAndLogs();
     } finally {
-      setIsLoading(false);
+      setTimeout(() => {
+        setCloudActionStatus('');
+        setSyncProgress(0);
+      }, 1400);
     }
   };
 
-  // Action: Quick Rollback to LocalStorage Snapshot
-  const handleRestoreLocalSnapshot = async () => {
-    const raw = localStorage.getItem('baf_local_storage_snapshot');
-    if (!raw) {
-      setErrorMessage('পূর্বে সংরক্ষিত কোনো লোকাল সেভপয়েন্ট পাওয়া যায়নি।');
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(raw);
-      setPendingRestoreData(parsed);
-      setPendingFileName('লোকাল সেভপয়েন্ট স্ন্যাপশট');
-      setShowRestoreConfirm(true);
-    } catch {
-      setErrorMessage('সেভপয়েন্ট ডাটা পড়তে সমস্যা হয়েছে।');
-    }
-  };
-
-  // Action: Handle Uploaded JSON File Selection
+  // LOCAL CLOUD ACTION 2: Restore (Select .json Backup File)
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -254,61 +214,206 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
         const parsed = JSON.parse(text);
 
         if (!parsed.baf_unit_data && !parsed.airmen && !parsed.canteen) {
-          throw new Error('অবৈধ ব্যাকআপ ফাইল। ফাইলটিতে ১৫৫ ইউএএসইউ-এর ডাটা নেই।');
+          throw new Error('Invalid backup file. No 155 UASU database data found in this file.');
         }
 
         setPendingRestoreData(parsed);
         setShowRestoreConfirm(true);
       } catch (err: any) {
-        setErrorMessage('ফাইল লোড ত্রুটি: ' + (err.message || 'ভুল ফরম্যাট'));
+        addLocalCloudSyncLog({
+          timestamp: new Date().toISOString(),
+          type: 'PULL',
+          status: 'ERROR',
+          message: `Failed loading backup file "${file.name}": ${err?.message || 'Invalid JSON format'}`,
+        });
+        setErrorMessage('File load error: ' + (err.message || 'Invalid JSON format'));
+        refreshCloudStatusAndLogs();
       }
     };
     reader.readAsText(file);
     event.target.value = '';
   };
 
-  // Execute Restore from Pending Data
+  // Execute File Restore with Circle Percentage Progress + Log to Local Cloud Logs
   const executeRestore = async () => {
     if (!pendingRestoreData) return;
 
     setIsLoading(true);
-    setStatusMessage('ডাটাবেজ রিস্টোর করা হচ্ছে...');
+    setIsRestoring(true);
+    setRestoreProgress(4);
+    setRestoreStage('Starting database and settings restore...');
     setErrorMessage('');
     setSuccessMessage('');
 
-    try {
-      const res = await restoreFromBackupData(pendingRestoreData);
-      const now = new Date().toISOString();
-      setSuccessMessage(
-        `ডাটাবেজ সফলভাবে রিস্টোর হয়েছে! (${res.restoredAirmen} জন এয়ারম্যান, ${res.restoredAssignments.toLocaleString()}টি ডিউটি অ্যাসাইনমেন্ট)`
-      );
-
-      const isSnapshot = pendingFileName === 'লোকাল সেভপয়েন্ট স্ন্যাপশট';
-      addHistoryItem({
-        timestamp: now,
-        actionType: isSnapshot ? 'SNAPSHOT_RESTORE' : 'FILE_RESTORE',
-        title: isSnapshot ? 'সেভপয়েন্ট থেকে রিস্টোর' : 'ব্যাকআপ ফাইল রিস্টোর',
-        details: `${res.restoredAirmen} জন এয়ারম্যান, ${res.restoredAssignments.toLocaleString()}টি অ্যাসাইনমেন্ট রিস্টোর সম্পন্ন`,
-        airmenCount: res.restoredAirmen,
-        assignmentsCount: res.restoredAssignments,
-        membersCount: res.restoredMembers,
-        fileName: pendingFileName,
-        status: 'SUCCESS',
+    let targetPercent = 8;
+    const progressTimer = window.setInterval(() => {
+      setRestoreProgress((prev) => {
+        if (prev < targetPercent) {
+          const step = Math.max(1, Math.ceil((targetPercent - prev) * 0.35));
+          return Math.min(targetPercent, prev + step);
+        }
+        return prev;
       });
+    }, 45);
+
+    try {
+      const res = await restoreFromBackupData(pendingRestoreData, (pct, stageLabel) => {
+        targetPercent = Math.max(targetPercent, pct);
+        setRestoreStage(stageLabel);
+      });
+
+      targetPercent = 100;
+      setRestoreProgress(100);
+      setRestoreStage('Database and settings restore completed!');
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      const now = new Date().toISOString();
+      addLocalCloudSyncLog({
+        timestamp: now,
+        type: 'PULL',
+        status: 'SUCCESS',
+        message: `Restored from "${pendingFileName || 'backup.json'}": ${res.restoredAirmen} Airmen, ${res.restoredAssignments.toLocaleString()} Duty Records & ${res.restoredSettings} Settings.`,
+      });
+
+      setSuccessMessage(
+        `Database restored successfully! (${res.restoredAirmen} Airmen, ${res.restoredAssignments.toLocaleString()} Duty Records, ${res.restoredSettings} Settings)`
+      );
 
       setShowRestoreConfirm(false);
       setPendingRestoreData(null);
       setPendingFileName('');
-      await refreshStats();
 
-      // Trigger global event so all open views refresh instantly
       window.dispatchEvent(new CustomEvent('baf_state_updated'));
       window.dispatchEvent(new CustomEvent('canteen_members_updated'));
+      refreshCloudStatusAndLogs();
     } catch (err: any) {
-      setErrorMessage(err.message || 'রিস্টোর প্রক্রিয়া ব্যর্থ হয়েছে');
+      addLocalCloudSyncLog({
+        timestamp: new Date().toISOString(),
+        type: 'PULL',
+        status: 'ERROR',
+        message: `Restore failed (${pendingFileName || 'backup.json'}): ${err?.message || 'Unknown error'}`,
+      });
+      setErrorMessage(err.message || 'Restore process failed.');
+      setShowRestoreConfirm(false);
+      refreshCloudStatusAndLogs();
     } finally {
+      window.clearInterval(progressTimer);
       setIsLoading(false);
+      setIsRestoring(false);
+      setRestoreProgress(0);
+      setRestoreStage('');
     }
+  };
+
+  // FIREBASE CLOUD ACTION 1: Push to Cloud
+  const handleFirebasePush = async () => {
+    if (cloudActionStatus || isLoading) return;
+    setErrorMessage('');
+    setSuccessMessage('');
+    setCloudActionStatus('Uploading...');
+    setSyncProgress(15);
+    setSyncActionMessage('Uploading changed data to Firebase...');
+
+    try {
+      const probe = await probeFirebaseConnectionAndQuota(true);
+      if (probe.quotaExceeded || isFirestoreQuotaExceeded()) {
+        setSyncActionMessage('Firebase Quota Full!');
+        setErrorMessage(
+          'Firebase দৈনিক ফ্রি Quota পূর্ণ হয়ে গেছে। আপনার পরিবর্তন Local Cloud কিউ-তে সুরক্ষিত আছে।'
+        );
+        refreshCloudStatusAndLogs();
+        return;
+      }
+
+      setSyncProgress(45);
+      const pendingBefore = getPendingDeltaCount();
+      const [officeOk, canteenOk] = await Promise.all([
+        localDb.saveToFirebase(localDb.getDb(), true),
+        performCanteenBackup(false),
+      ]);
+
+      setSyncProgress(100);
+      if (officeOk && canteenOk) {
+        if (pendingBefore === 0) {
+          addSyncLog({
+            timestamp: new Date().toISOString(),
+            type: 'PUSH',
+            status: 'SUCCESS',
+            message: 'All Office, Duty & Canteen records are already in sync with Firebase Cloud.',
+          });
+        }
+        setSyncActionMessage('Upload Completed!');
+        setSuccessMessage('Firebase Cloud-এ ব্যাকআপ সফলভাবে সম্পন্ন হয়েছে!');
+      } else {
+        setSyncActionMessage('Partial Upload / Queued');
+        setErrorMessage('আংশিক ব্যাকআপ হয়েছে বা অফলাইনে আছে। অনুগ্রহ করে Recent Sync Logs দেখুন।');
+      }
+      refreshCloudStatusAndLogs();
+    } catch (err: any) {
+      setSyncActionMessage('Upload Failed!');
+      setErrorMessage('Firebase Cloud Push ব্যর্থ হয়েছে: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setTimeout(() => {
+        setCloudActionStatus('');
+        setSyncProgress(0);
+      }, 1400);
+    }
+  };
+
+  // FIREBASE CLOUD ACTION 2: Pull from Cloud
+  const handleFirebasePull = async () => {
+    if (cloudActionStatus || isLoading) return;
+    setErrorMessage('');
+    setSuccessMessage('');
+    setCloudActionStatus('Downloading...');
+    setSyncProgress(15);
+    setSyncActionMessage('Pulling latest data from Firebase Cloud...');
+
+    try {
+      const probe = await probeFirebaseConnectionAndQuota(true);
+      if (probe.quotaExceeded || isFirestoreQuotaExceeded()) {
+        setSyncActionMessage('Firebase Quota Exceeded');
+        setErrorMessage(
+          'Firebase Quota শেষ থাকার কারণে এই মুহূর্তে ক্লাউড থেকে ডাউনলোড করা যাচ্ছে না। Local Cloud সক্রিয় আছে।'
+        );
+        refreshCloudStatusAndLogs();
+        return;
+      }
+
+      setSyncProgress(50);
+      await Promise.all([
+        localDb.syncFromFirebase({ isLoginSync: false, isQuotaRecovery: true }),
+        pullAllCanteenDataFromCloud({ isLoginSync: false, isQuotaRecovery: true }),
+      ]);
+
+      setSyncProgress(100);
+      setSyncActionMessage('Download Completed!');
+      window.dispatchEvent(new CustomEvent('baf_state_updated'));
+      window.dispatchEvent(new CustomEvent('canteen_members_updated'));
+      setSuccessMessage('Firebase Cloud থেকে সর্বশেষ ডাটা সফলভাবে রিলোড হয়েছে!');
+      refreshCloudStatusAndLogs();
+    } catch (err: any) {
+      setSyncActionMessage('Download Failed!');
+      setErrorMessage('Firebase Cloud Pull ব্যর্থ হয়েছে: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setTimeout(() => {
+        setCloudActionStatus('');
+        setSyncProgress(0);
+      }, 1400);
+    }
+  };
+
+  const handleClearActiveLogs = () => {
+    if (activeCloudTab === 'LOCAL') {
+      clearLocalCloudSyncLogs();
+      setSuccessMessage('Local Cloud logs cleared.');
+    } else {
+      clearSyncLogs();
+      clearCanteenSyncLogs();
+      setSuccessMessage('Firebase Cloud logs cleared.');
+    }
+    refreshCloudStatusAndLogs();
+    setTimeout(() => setSuccessMessage(''), 3000);
   };
 
   const formatHistoryDate = (isoStr: string) => {
@@ -328,18 +433,34 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
     }
   };
 
+  const activeLogs = activeCloudTab === 'LOCAL' ? localCloudLogs : firebaseLogs;
+
+  const getLogTitle = (log: any) => {
+    if (activeCloudTab === 'LOCAL') {
+      if (log.type === 'PUSH') {
+        return log.message?.toLowerCase().includes('.json') || log.message?.toLowerCase().includes('offline')
+          ? 'Offline Backup Downloaded'
+          : 'Uploaded to Local Cloud';
+      }
+      return log.message?.toLowerCase().includes('restored') || log.message?.toLowerCase().includes('.json')
+        ? 'Restored from Backup File'
+        : 'Downloaded from Local Cloud';
+    }
+    return log.type === 'PULL' ? 'Downloaded from Cloud' : 'Uploaded to Cloud';
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-[#0c0e14] text-slate-100 flex flex-col min-h-screen overflow-y-auto">
-      {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-[#141721]/95 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-lg">
+    <div className="fixed inset-0 z-50 bg-[#0c0e14] text-slate-100 flex flex-col w-screen h-screen overflow-hidden">
+      {/* Full-Width Top Header */}
+      <header className="shrink-0 bg-[#141721]/95 backdrop-blur-md border-b border-slate-800/80 px-5 sm:px-10 py-3.5 flex items-center justify-between shadow-lg">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 text-xs font-bold transition-all cursor-pointer shadow-xs"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>ড্যাশবোর্ড (Back)</span>
+            <span>Back</span>
           </button>
 
           <div className="hidden sm:block h-5 w-px bg-slate-800" />
@@ -351,496 +472,509 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                 155 UASU BAF • BASE ZHR
               </div>
               <h1 className="text-sm sm:text-base font-black text-white tracking-tight leading-none">
-                ডাটাবেজ ব্যাকআপ ও রিস্টোর পোর্টাল
+                Database Cloud Sync & Backup
               </h1>
             </div>
           </div>
         </div>
 
-        {/* Status Badge */}
+        {/* Clean Live Status Pill */}
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            লোকাল অফলাইন মোড
-          </span>
+          {quotaExceeded ? (
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40">
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              Quota Full • Local Cloud
+            </span>
+          ) : cloudState.status === 'syncing' || cloudActionStatus !== '' ? (
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/40">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+              Syncing...
+            </span>
+          ) : !isOnline || !isFirebaseConfigured ? (
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+              <span className="w-2 h-2 rounded-full bg-rose-400" />
+              Local Offline Mode
+            </span>
+          ) : pendingCount > 0 ? (
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-sky-500/15 text-sky-300 border border-sky-500/40">
+              <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+              {pendingCount} Pending
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              Cloud Synced
+            </span>
+          )}
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-7 space-y-6">
-        {/* Alerts */}
-        {errorMessage && (
-          <div className="flex items-center justify-between p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs sm:text-sm font-semibold animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-            <button
-              onClick={() => setErrorMessage('')}
-              className="p-1 hover:bg-rose-500/20 rounded-lg cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {successMessage && (
-          <div className="flex items-center justify-between p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400 text-xs sm:text-sm font-semibold animate-in fade-in">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-5 h-5 shrink-0" />
-              <span>{successMessage}</span>
-            </div>
-            <button
-              onClick={() => setSuccessMessage('')}
-              className="p-1 hover:bg-emerald-500/20 rounded-lg cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {isLoading && (
-          <div className="flex items-center gap-3 p-4 bg-sky-500/10 border border-sky-500/30 rounded-2xl text-sky-400 text-xs sm:text-sm font-semibold animate-pulse">
-            <RefreshCw className="w-5 h-5 animate-spin shrink-0" />
-            <span>{statusMessage || 'প্রসেসিং হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...'}</span>
-          </div>
-        )}
-
-        {/* Section 1: Device Storage Overview Banner */}
-        <section className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center p-2.5 text-emerald-400 shadow-inner shrink-0">
-                <HardDrive className="w-6 h-6" />
+      {/* Full-Screen Laptop Body */}
+      <main className="flex-1 w-full flex flex-col px-5 sm:px-10 lg:px-16 py-5 sm:py-7 overflow-y-auto">
+        <div className="w-full max-w-6xl mx-auto flex-1 flex flex-col gap-5">
+          {/* Alerts */}
+          {errorMessage && (
+            <div className="shrink-0 flex items-center justify-between p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs sm:text-sm font-semibold animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <span>{errorMessage}</span>
               </div>
-
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm sm:text-base font-black text-white">
-                    ডিভাইস লোকাল স্টোরেজ (Local Storage)
-                  </h2>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                    সুরক্ষিত
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                  আপনার এয়ারম্যান বায়োডাটা, রোস্টার ও ক্যান্টিনের হিসাব ডিভাইসে সরাসরি সংরক্ষিত থাকে।
-                </p>
-
-                {systemStats.lastSavedTime && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1.5 font-mono">
-                    <Clock className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>
-                      সর্বশেষ স্ন্যাপশট:{' '}
-                      <strong className="text-emerald-300">
-                        {formatHistoryDate(systemStats.lastSavedTime)}
-                      </strong>
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleCreateLocalSnapshot}
-              disabled={isLoading}
-              className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              <span>তাত্ক্ষণিক সেভপয়েন্ট তৈরি</span>
-            </button>
-          </div>
-        </section>
-
-        {/* Section 2: Backup & Restore Actions (Clean 2-Column Grid) */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Card 1: Local File Backup (.json Download) */}
-          <div className="bg-[#151720] border border-slate-800 hover:border-emerald-500/40 rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col justify-between transition-all group">
-            <div className="space-y-2.5">
-              <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
-                <Download className="w-5 h-5" />
-              </div>
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm sm:text-base font-bold text-white">
-                  অফলাইন ব্যাকআপ ডাউনলোড (.json)
-                </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-bold">
-                  সুপারিশকৃত
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                সম্পূর্ণ ডাটাবেজ একক ফাইলে নিজের কম্পিউটার বা মোবাইলে ডাউনলোড করে নিরাপদ রাখুন।
-              </p>
-            </div>
-
-            <div className="pt-4 mt-4 border-t border-slate-800/80">
               <button
                 type="button"
-                onClick={handleDownloadLocalJson}
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
+                onClick={() => setErrorMessage('')}
+                className="p-1 hover:bg-rose-500/20 rounded-lg cursor-pointer"
               >
-                <Download className="w-4 h-4" />
-                <span>ব্যাকআপ ফাইল ডাউনলোড (.json)</span>
+                <X className="w-4 h-4" />
               </button>
-            </div>
-          </div>
-
-          {/* Card 2: Restore from Offline File (.json Upload) */}
-          <div className="bg-[#151720] border border-slate-800 hover:border-sky-500/40 rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col justify-between transition-all group">
-            <div className="space-y-2.5">
-              <div className="w-11 h-11 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center">
-                <Upload className="w-5 h-5" />
-              </div>
-              <h3 className="text-sm sm:text-base font-bold text-white">
-                ব্যাকআপ ফাইল থেকে রিস্টোর
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                পূর্বে সেভ করা `.json` ব্যাকআপ ফাইল সিলেক্ট করে ডাটাবেজের সমস্ত ডাটা প্রতিস্থাপন করুন।
-              </p>
-            </div>
-
-            <div className="pt-4 mt-4 border-t border-slate-800/80">
-              <label className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 hover:border-slate-600 transition-all cursor-pointer">
-                <Upload className="w-4 h-4 text-sky-400" />
-                <span>ফাইল নির্বাচন করুন (.json)</span>
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  disabled={isLoading}
-                />
-              </label>
-            </div>
-          </div>
-        </section>
-
-        {/* Section 3: Quick Snapshot Rollback */}
-        <section className="bg-[#151720] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center shrink-0">
-              <RotateCcw className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-xs sm:text-sm font-bold text-white">
-                ব্রাউজার সেভপয়েন্ট রিস্টোর
-              </h4>
-              <p className="text-[11px] text-slate-400">
-                ফাইল নির্বাচন ছাড়াই সরাসরি শেষ সংরক্ষিত সেভপয়েন্টে ডাটাবেজ ফিরিয়ে নিন।
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleRestoreLocalSnapshot}
-            disabled={isLoading}
-            className="w-full sm:w-auto px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-bold text-xs transition-colors cursor-pointer shrink-0"
-          >
-            সেভপয়েন্ট রিস্টোর
-          </button>
-        </section>
-
-        {/* Section 4: Live Database Statistics */}
-        <section className="bg-[#151720] border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
-            <div className="flex items-center gap-2">
-              <Database className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-xs sm:text-sm font-bold text-white">
-                বর্তমান ডাটাবেজ পরিসংখ্যান
-              </h3>
-            </div>
-            <button
-              type="button"
-              onClick={refreshStats}
-              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>রিফ্রেশ</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800/80 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <Users className="w-3.5 h-3.5 text-emerald-400" />
-                <span>এয়ারম্যান সংখ্যা</span>
-              </div>
-              <div className="text-lg sm:text-xl font-black text-white font-mono">
-                {systemStats.airmenCount}
-              </div>
-              <span className="text-[10px] text-emerald-400/80 font-medium">নমিনাল রোল</span>
-            </div>
-
-            <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800/80 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <Calendar className="w-3.5 h-3.5 text-sky-400" />
-                <span>ডিউটি রেকর্ড</span>
-              </div>
-              <div className="text-lg sm:text-xl font-black text-white font-mono">
-                {systemStats.assignmentsCount.toLocaleString()}
-              </div>
-              <span className="text-[10px] text-sky-400/80 font-medium">রোস্টার ও প্যারেড</span>
-            </div>
-
-            <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800/80 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-                <span>ক্যান্টিন মেম্বার</span>
-              </div>
-              <div className="text-lg sm:text-xl font-black text-white font-mono">
-                {systemStats.canteenMembersCount}
-              </div>
-              <span className="text-[10px] text-amber-400/80 font-medium">সদস্য তালিকা</span>
-            </div>
-
-            <div className="bg-slate-900/70 p-3.5 rounded-2xl border border-slate-800/80 space-y-1">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <FileText className="w-3.5 h-3.5 text-purple-400" />
-                <span>লেনদেন হিসেব</span>
-              </div>
-              <div className="text-lg sm:text-xl font-black text-white font-mono">
-                {systemStats.canteenTransactionsCount}
-              </div>
-              <span className="text-[10px] text-purple-400/80 font-medium">মোট ট্রানজেকশন</span>
-            </div>
-          </div>
-        </section>
-
-        {/* Section 5: Restore History (রিস্টোর ও ব্যাকআপ হিস্ট্রি) */}
-        <section className="bg-[#151720] border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <History className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm sm:text-base font-bold text-white">
-                  রিস্টোর হিস্ট্রি (Restore History)
-                </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono font-bold">
-                  {historyList.length} টি রেকর্ড
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                ডাটাবেজ রিস্টোর ও ব্যাকআপের স্থায়ী লগ। আপনি ম্যানুয়ালি না মুছলে এগুলো কখনোই অটো ডিলিট হবে না।
-              </p>
-            </div>
-
-            {historyList.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowClearHistoryConfirm(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-bold transition-colors cursor-pointer shrink-0"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>সব হিস্ট্রি মুছুন</span>
-              </button>
-            )}
-          </div>
-
-          {/* History Items List */}
-          {historyList.length === 0 ? (
-            <div className="py-8 text-center space-y-2 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
-              <FileCheck className="w-8 h-8 text-slate-600 mx-auto" />
-              <p className="text-xs font-medium text-slate-400">
-                এখনো কোনো রিস্টোর বা ব্যাকআপের হিস্ট্রি সংরক্ষিত নেই।
-              </p>
-              <p className="text-[10px] text-slate-500">
-                যেকোনো ব্যাকআপ নেওয়া বা রিস্টোর করার সাথে সাথে এখানে স্থায়ীভাবে রেকর্ড যুক্ত হবে।
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {historyList.map((item) => {
-                const isRestore = item.actionType.includes('RESTORE');
-                const isBackup = item.actionType === 'FILE_BACKUP';
-                return (
-                  <div
-                    key={item.id}
-                    className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 flex items-start justify-between gap-3 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-                          isRestore
-                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                            : isBackup
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : 'bg-sky-500/10 text-sky-400 border-sky-500/20'
-                        }`}
-                      >
-                        {isRestore ? (
-                          <Upload className="w-4 h-4" />
-                        ) : isBackup ? (
-                          <Download className="w-4 h-4" />
-                        ) : (
-                          <Save className="w-4 h-4" />
-                        )}
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-white">{item.title}</span>
-                          <span
-                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
-                              isRestore
-                                ? 'bg-amber-500/20 text-amber-300'
-                                : isBackup
-                                ? 'bg-emerald-500/20 text-emerald-300'
-                                : 'bg-sky-500/20 text-sky-300'
-                            }`}
-                          >
-                            {isRestore ? 'রিস্টোর' : isBackup ? 'ব্যাকআপ' : 'সেভপয়েন্ট'}
-                          </span>
-                          <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                            <Check className="w-3 h-3" /> সফল
-                          </span>
-                        </div>
-
-                        <p className="text-[11px] text-slate-300">{item.details}</p>
-
-                        <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-slate-500" />
-                            {formatHistoryDate(item.timestamp)}
-                          </span>
-                          {item.fileName && (
-                            <span className="text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded">
-                              ফাইল: {item.fileName}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Single Delete Button */}
-                    <button
-                      type="button"
-                      onClick={() => deleteHistoryItem(item.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
-                      title="এই হিস্ট্রি এন্ট্রি মুছুন"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                );
-              })}
             </div>
           )}
-        </section>
+
+          {successMessage && (
+            <div className="shrink-0 flex items-center justify-between p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400 text-xs sm:text-sm font-semibold animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuccessMessage('')}
+                className="p-1 hover:bg-emerald-500/20 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* 2-Option Mode Switcher: Local Cloud | Firebase Cloud */}
+          <div className="shrink-0 w-full max-w-xl mx-auto bg-[#141927] border border-slate-800 rounded-2xl p-1.5 grid grid-cols-2 gap-2 shadow-lg">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCloudTab('LOCAL');
+                setErrorMessage('');
+                setSuccessMessage('');
+              }}
+              className={`flex items-center justify-center gap-2 py-3 px-5 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+                activeCloudTab === 'LOCAL'
+                  ? 'bg-[#1e293b] text-emerald-400 border border-emerald-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <HardDrive className="w-4 h-4" />
+              <span>Local Cloud</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCloudTab('FIREBASE');
+                setErrorMessage('');
+                setSuccessMessage('');
+              }}
+              className={`flex items-center justify-center gap-2 py-3 px-5 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+                activeCloudTab === 'FIREBASE'
+                  ? 'bg-[#1e293b] text-blue-400 border border-blue-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <Cloud className="w-4 h-4" />
+              <span>Firebase Cloud</span>
+            </button>
+          </div>
+
+          {/* Full-Screen Main Interface Card (Same Clean Layout in Both Tabs) */}
+          <section className="flex-1 w-full bg-[#131826] border border-slate-800/80 rounded-3xl p-6 sm:p-8 lg:p-10 shadow-2xl flex flex-col justify-between">
+            {/* Upper Centered Action Area */}
+            <div className="flex flex-col items-center justify-center text-center max-w-2xl w-full mx-auto">
+              <div
+                className={`w-16 h-16 rounded-full flex items-center justify-center mb-5 ${
+                  activeCloudTab === 'LOCAL' ? 'bg-emerald-500/15' : 'bg-[#1e2b4d]'
+                }`}
+              >
+                {activeCloudTab === 'LOCAL' ? (
+                  <HardDrive className="w-8 h-8 text-emerald-400" />
+                ) : (
+                  <Cloud className="w-8 h-8 text-blue-400" />
+                )}
+              </div>
+
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {activeCloudTab === 'LOCAL' ? 'Local Cloud Backup & Restore' : 'Firebase Cloud Sync'}
+              </h2>
+
+              <p className="text-sm text-slate-400 mb-7 max-w-lg leading-relaxed">
+                {activeCloudTab === 'LOCAL'
+                  ? 'সম্পূর্ণ ডাটাবেজ ও সেটিংস অফলাইন ফাইল (.json) হিসেবে ব্যাকআপ নিন অথবা আগের ব্যাকআপ ফাইল সিলেক্ট করে রিস্টোর করুন।'
+                  : 'লোকাল ডাটাবেজ পরিবর্তনসমূহ Firebase Cloud-এ সংরক্ষণ করুন বা ক্লাউড থেকে সর্বশেষ ডাটা রিলোড করুন।'}
+              </p>
+
+              {/* Progress Bar */}
+              {(cloudActionStatus === 'Uploading...' || cloudActionStatus === 'Downloading...') &&
+                syncProgress >= 0 &&
+                syncProgress <= 100 && (
+                  <div className="w-full max-w-md mb-6">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                        {syncActionMessage || 'Processing...'}
+                      </span>
+                      <span className="text-xs font-bold text-slate-300">{syncProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-700">
+                      <div
+                        className="bg-gradient-to-r from-blue-500 to-indigo-500 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${syncProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+              {/* Action Buttons: Backup / Restore for Local Cloud | Push to Cloud / Pull from Cloud for Firebase Cloud */}
+              {activeCloudTab === 'LOCAL' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+                  <button
+                    type="button"
+                    onClick={handleLocalOfflineBackup}
+                    disabled={cloudActionStatus !== '' || isLoading}
+                    className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(59,130,246,0.35)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-600/45 to-indigo-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                      <Download
+                        className={`w-4 h-4 text-blue-400 ${
+                          cloudActionStatus === 'Uploading...' ? 'animate-bounce' : ''
+                        }`}
+                      />
+                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                        {cloudActionStatus === 'Uploading...' && syncProgress === 100
+                          ? 'Downloaded!'
+                          : cloudActionStatus === 'Uploading...'
+                          ? 'Preparing...'
+                          : 'Backup (.json)'}
+                      </span>
+                    </div>
+                  </button>
+
+                  <label
+                    className={`relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(16,185,129,0.35)] ${
+                      cloudActionStatus !== '' || isLoading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'
+                    }`}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-600/45 to-teal-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                      <Upload className="w-4 h-4 text-emerald-400" />
+                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                        Restore (Select File)
+                      </span>
+                    </div>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      disabled={cloudActionStatus !== '' || isLoading}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+                  <button
+                    type="button"
+                    onClick={handleFirebasePush}
+                    disabled={cloudActionStatus !== '' || isLoading}
+                    className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(59,130,246,0.35)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-600/45 to-indigo-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                      <Upload
+                        className={`w-4 h-4 text-blue-400 ${
+                          cloudActionStatus === 'Uploading...' ? 'animate-bounce' : ''
+                        }`}
+                      />
+                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                        {cloudActionStatus === 'Uploading...' && syncProgress === 100
+                          ? 'Success!'
+                          : cloudActionStatus === 'Uploading...'
+                          ? 'Uploading...'
+                          : 'Push to Cloud'}
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleFirebasePull}
+                    disabled={cloudActionStatus !== '' || isLoading}
+                    className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(16,185,129,0.35)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-600/45 to-teal-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                      <Download
+                        className={`w-4 h-4 text-emerald-400 ${
+                          cloudActionStatus === 'Downloading...' ? 'animate-bounce' : ''
+                        }`}
+                      />
+                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                        {cloudActionStatus === 'Downloading...' && syncProgress === 100
+                          ? 'Success!'
+                          : cloudActionStatus === 'Downloading...'
+                          ? 'Downloading...'
+                          : 'Pull from Cloud'}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Logs Section inside the Full-Screen Card */}
+            <div className="mt-8 flex-1 flex flex-col min-h-[200px]">
+              <div className="flex items-center justify-between mb-3 px-1">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  {activeCloudTab === 'LOCAL' ? 'Recent Backup & Restore Logs' : 'Recent Sync Logs'}
+                </h3>
+                {activeLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearActiveLogs}
+                    className="text-xs font-semibold text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                  >
+                    Clear Logs
+                  </button>
+                )}
+              </div>
+
+              {activeLogs.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center py-10 bg-slate-800/30 rounded-2xl border border-slate-800/60">
+                  <p className="text-sm font-bold text-slate-500">
+                    {activeCloudTab === 'LOCAL'
+                      ? 'No recent Backup or Restore logs.'
+                      : 'No recent Firebase Sync logs.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 max-h-[340px]">
+                  {activeLogs.map((log: any) => (
+                    <div
+                      key={log.id}
+                      className="p-4 bg-[#1b2234] border border-slate-700/50 rounded-xl flex justify-between items-start gap-4"
+                    >
+                      <div className="flex gap-3 min-w-0">
+                        <div className="pt-1.5 shrink-0">
+                          <div
+                            className={`w-2.5 h-2.5 rounded-full ${
+                              log.status === 'SUCCESS' ? 'bg-emerald-500' : 'bg-red-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-white mb-0.5">{getLogTitle(log)}</p>
+                          <p className="text-xs text-slate-400 break-words leading-relaxed">
+                            {log.message}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono text-right shrink-0 mt-0.5">
+                        {new Date(log.timestamp).toLocaleDateString()}
+                        <br />
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Subtle Single-Line Auto-Sync & Color Legend Footer inside Firebase Tab */}
+              {activeCloudTab === 'FIREBASE' && (
+                <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-400">
+                  <span>
+                    {activeUsers >= 2
+                      ? `একাধিক ইউজার (${activeUsers} জন) সক্রিয় — পরিবর্তন হলে ১০ সেকেন্ড পরপর Auto Backup`
+                      : '১ জন ইউজার সক্রিয় — ৩০ মিনিট পরপর ও অ্যাপ বন্ধ করার আগে Auto Backup'}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="inline-flex items-center gap-1 text-emerald-400">
+                      <Cloud className="w-3.5 h-3.5" /> Synced
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-indigo-400">
+                      <Cloud className="w-3.5 h-3.5" /> Syncing
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-sky-400">
+                      <Cloud className="w-3.5 h-3.5" /> Queued
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-amber-400">
+                      <Cloud className="w-3.5 h-3.5" /> Quota Full
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-rose-400">
+                      <CloudOff className="w-3.5 h-3.5" /> Offline
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </main>
 
-      {/* Confirmation Modal for Data Restore */}
+      {/* Confirmation & Circular Progress Modal for Backup File Restore */}
       {showRestoreConfirm && pendingRestoreData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-[#161821] border border-amber-500/40 rounded-3xl p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center gap-3 text-amber-400">
-              <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-6 h-6" />
+          <div
+            className={`w-full max-w-md bg-[#161821] border ${
+              isRestoring ? 'border-emerald-500/40' : 'border-amber-500/40'
+            } rounded-3xl p-6 shadow-2xl space-y-4 animate-in zoom-in-95`}
+          >
+            {isRestoring ? (
+              <div className="py-4 flex flex-col items-center text-center space-y-5">
+                <div className="space-y-1">
+                  <h3 className="text-base font-black text-white">
+                    Restoring Database & Settings
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Please wait, do not close or refresh this page
+                  </p>
+                </div>
+
+                {/* Circular Progress Gauge */}
+                <div className="relative w-36 h-36 flex items-center justify-center">
+                  <svg className="w-36 h-36 -rotate-90 transform" viewBox="0 0 120 120">
+                    <defs>
+                      <linearGradient id="restoreCircleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#10b981" />
+                        <stop offset="50%" stopColor="#06b6d4" />
+                        <stop offset="100%" stopColor="#f59e0b" />
+                      </linearGradient>
+                    </defs>
+                    <circle
+                      cx="60"
+                      cy="60"
+                      r="50"
+                      fill="none"
+                      stroke="rgba(51, 65, 85, 0.45)"
+                      strokeWidth="10"
+                    />
+                    <circle
+                      cx="60"
+                      cy="60"
+                      r="50"
+                      fill="none"
+                      stroke={restoreProgress >= 100 ? '#10b981' : 'url(#restoreCircleGrad)'}
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                      strokeDasharray={2 * Math.PI * 50}
+                      strokeDashoffset={
+                        2 * Math.PI * 50 * (1 - Math.min(100, Math.max(0, restoreProgress)) / 100)
+                      }
+                      className="transition-all duration-150 ease-out"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    {restoreProgress >= 100 ? (
+                      <CheckCircle2 className="w-7 h-7 text-emerald-400 mb-0.5 animate-in zoom-in" />
+                    ) : null}
+                    <span className="text-2xl font-black font-mono text-white tracking-tight">
+                      {restoreProgress}%
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                      {restoreProgress >= 100 ? 'Complete' : 'Restoring'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl px-4 py-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-medium">Current Step:</span>
+                    <span className="font-mono font-bold text-emerald-400">{restoreProgress}%</span>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-200">
+                    {restoreStage || 'Restoring database and settings...'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm sm:text-base font-black text-white">
-                  ডাটাবেজ রিস্টোর নিশ্চিতকরণ
-                </h3>
-                <p className="text-[11px] text-amber-300">
-                  বর্তমান ডাটাবেজের সমস্ত রেকর্ড নতুন ব্যাকআপ ডাটা দিয়ে প্রতিস্থাপিত হবে
+            ) : (
+              <>
+                <div className="flex items-center gap-3 text-amber-400">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-white">
+                      Confirm Database Restore
+                    </h3>
+                    <p className="text-[11px] text-amber-300">
+                      Current database records and settings will be replaced with this backup data
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/80 rounded-2xl p-3.5 border border-slate-800 text-xs text-slate-300 space-y-1.5">
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Airmen Count:</span>
+                    <strong className="text-white font-mono">
+                      {pendingRestoreData.baf_unit_data?.airmen?.length ||
+                        pendingRestoreData.airmen?.length ||
+                        'Found'}{' '}
+                      Personnel
+                    </strong>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Canteen Members:</span>
+                    <strong className="text-white font-mono">
+                      {pendingRestoreData.canteen?.members?.length ||
+                        pendingRestoreData.canteen_members?.length ||
+                        'Found'}{' '}
+                      Members
+                    </strong>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Duty & Other Settings:</span>
+                    <strong className="text-emerald-400 font-mono">
+                      {pendingRestoreData.canteen?.settings?.length ||
+                        pendingRestoreData.app_settings?.length ||
+                        (pendingRestoreData.localSettings
+                          ? Object.keys(pendingRestoreData.localSettings).length
+                          : 0) ||
+                        'Included'}{' '}
+                      Items
+                    </strong>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-400">Backup Date:</span>
+                    <strong className="text-white font-mono text-[11px]">
+                      {pendingRestoreData.exportedAt
+                        ? formatHistoryDate(pendingRestoreData.exportedAt)
+                        : 'Offline Savepoint'}
+                    </strong>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Are you sure you want to restore this backup and apply it to the system?
                 </p>
-              </div>
-            </div>
 
-            <div className="bg-slate-900/80 rounded-2xl p-3.5 border border-slate-800 text-xs text-slate-300 space-y-1.5">
-              <div className="flex justify-between py-1 border-b border-slate-800/80">
-                <span className="text-slate-400">এয়ারম্যান সংখ্যা:</span>
-                <strong className="text-white font-mono">
-                  {pendingRestoreData.baf_unit_data?.airmen?.length || pendingRestoreData.airmen?.length || 'পাওয়া গেছে'} জন
-                </strong>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800/80">
-                <span className="text-slate-400">ক্যান্টিন সদস্য:</span>
-                <strong className="text-white font-mono">
-                  {pendingRestoreData.canteen?.members?.length || pendingRestoreData.canteen_members?.length || 'পাওয়া গেছে'} জন
-                </strong>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-400">ব্যাকআপের তারিখ:</span>
-                <strong className="text-white font-mono text-[11px]">
-                  {pendingRestoreData.exportedAt
-                    ? formatHistoryDate(pendingRestoreData.exportedAt)
-                    : 'অফলাইন সেভপয়েন্ট'}
-                </strong>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-400 leading-relaxed">
-              আপনি কি নিশ্চিত যে এই ব্যাকআপটি রিস্টোর করে সিস্টেমে প্রয়োগ করতে চান?
-            </p>
-
-            <div className="flex items-center gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRestoreConfirm(false);
-                  setPendingRestoreData(null);
-                  setPendingFileName('');
-                }}
-                disabled={isLoading}
-                className="flex-1 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
-              >
-                বাতিল করুন
-              </button>
-              <button
-                type="button"
-                onClick={executeRestore}
-                disabled={isLoading}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white text-xs font-bold shadow-md transition-all cursor-pointer"
-              >
-                {isLoading ? 'রিস্টোর হচ্ছে...' : 'রিস্টোর সম্পন্ন করুন'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation Modal for Clearing All History */}
-      {showClearHistoryConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-sm bg-[#161821] border border-rose-500/40 rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white">
-                  সমস্ত হিস্ট্রি মুছে ফেলবেন?
-                </h3>
-                <p className="text-[11px] text-rose-300">
-                  এই পদক্ষেপটি অপরিবর্তনীয়
-                </p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              আপনি কি নিশ্চিত যে সংরক্ষিত সমস্ত রিস্টোর ও ব্যাকআপ হিস্ট্রি মুছে ফেলতে চান?
-            </p>
-
-            <div className="flex items-center gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowClearHistoryConfirm(false)}
-                className="flex-1 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
-              >
-                বাতিল
-              </button>
-              <button
-                type="button"
-                onClick={handleClearAllHistory}
-                className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md transition-all cursor-pointer"
-              >
-                হ্যাঁ, সব মুছুন
-              </button>
-            </div>
+                <div className="flex items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRestoreConfirm(false);
+                      setPendingRestoreData(null);
+                      setPendingFileName('');
+                    }}
+                    disabled={isLoading}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={executeRestore}
+                    disabled={isLoading}
+                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white text-xs font-bold shadow-md transition-all cursor-pointer"
+                  >
+                    Start Restore
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

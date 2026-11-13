@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase } from '../../../supabase';
+import { isFirebaseConfigured, isFirestoreQuotaExceeded } from '../../../firebase';
+import { fetchCanteenMembersFromFirebase, getPendingDeltaCount } from '../../../services/firebaseFirestoreService';
 import { localDb } from '../../../services/localDatabase';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
@@ -9,6 +10,7 @@ import { getCanteenMenuCache, fetchCanteenMenuOnce, fetchCanteenMembersOnce } fr
 import { getRawInventoryItems } from '../utils/recipeManager';
 import { autoCheckInitialCleanSlate } from '../utils/resetCanteenData';
 import { initCanteenCloudSync, pullAllCanteenDataFromCloud, getCanteenCloudSyncStatus, CloudSyncStatus, preloadImage } from '../utils/canteenCloudSync';
+import { FirebaseQuotaPopupModal } from '../../../components/FirebaseQuotaPopupModal';
 import { EmployeeDashboard } from '../pages/EmployeeDashboard';
 import { PersonalPortal } from '../pages/PersonalPortal';
 import { PlaceDemand } from '../pages/PlaceDemand';
@@ -45,6 +47,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const { t, i18n } = useTranslation();
   const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(() => getCanteenCloudSyncStatus());
+  const [isQuotaFull, setIsQuotaFull] = useState<boolean>(() => isFirestoreQuotaExceeded());
+  const [pendingDeltaCount, setPendingDeltaCount] = useState<number>(() => getPendingDeltaCount());
 
   const cleanBdInitial = initialMember?.bdNo ? initialMember.bdNo.replace(/^BD\/?/i, '').trim() : '';
   const currentMgrBd = (canteenConfig.managerBdNo || '475268').replace(/^BD\/?/i, '').trim().toLowerCase();
@@ -148,6 +152,9 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     autoCheckInitialCleanSlate();
     const cleanupCloudSync = initCanteenCloudSync();
 
+    // Download latest Canteen data from Firebase right on login (and show popup if quota exceeded)
+    pullAllCanteenDataFromCloud({ isLoginSync: true }).catch(() => {});
+
     // Instant pre-warming of Menu items (with DPs) and Raw Inventory items
     getCanteenMenuCache();
     getRawInventoryItems();
@@ -179,18 +186,28 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         if (e.detail) {
           setCloudSyncStatus(e.detail);
         }
+        setIsQuotaFull(isFirestoreQuotaExceeded());
+        setPendingDeltaCount(getPendingDeltaCount());
       }, 0);
+    };
+    const handleQuotaOrDeltaStatus = () => {
+      setIsQuotaFull(isFirestoreQuotaExceeded());
+      setPendingDeltaCount(getPendingDeltaCount());
     };
 
     window.addEventListener('storage', handleStorage);
     window.addEventListener('canteen_settings_updated', handleSettingsUpdated);
     window.addEventListener('canteen_cloud_sync_status', handleCloudSyncStatus);
+    window.addEventListener('baf_firebase_quota_status', handleQuotaOrDeltaStatus);
+    window.addEventListener('baf_pending_delta_updated', handleQuotaOrDeltaStatus);
 
     return () => {
       cleanupCloudSync();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('canteen_settings_updated', handleSettingsUpdated);
       window.removeEventListener('canteen_cloud_sync_status', handleCloudSyncStatus);
+      window.removeEventListener('baf_firebase_quota_status', handleQuotaOrDeltaStatus);
+      window.removeEventListener('baf_pending_delta_updated', handleQuotaOrDeltaStatus);
     };
   }, []);
 
@@ -217,29 +234,41 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
       const fetchCustomerPhoto = async () => {
         try {
-          // 1. Background delta check with Supabase Canteen table
-          if (cleanBd) {
-            const { data, error } = await supabase
-              .from('Canteen_Member')
-              .select('DP, Due, Surname, Rank, Contact, "BD No", airman_id')
-              .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
-              .limit(1);
+          // 1. Check local cache & Firebase canteen_members
+          let membersList: any[] = [];
+          try {
+            const rawAll = localStorage.getItem('canteen_members_cache');
+            if (rawAll) {
+              const parsed = JSON.parse(rawAll);
+              if (Array.isArray(parsed)) membersList = parsed;
+            }
+          } catch {}
 
-            if (!error && data && data.length > 0 && data[0].DP) {
+          if (membersList.length === 0 && isFirebaseConfigured && !isFirestoreQuotaExceeded()) {
+            membersList = await fetchCanteenMembersFromFirebase().catch(() => []);
+          }
+
+          if (cleanBd && membersList.length > 0) {
+            const match = membersList.find((m: any) => {
+              const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+              const mAid = String(m.airman_id || '').replace(/^airman-/i, '');
+              return mBd === cleanBd || mAid === cleanBd;
+            });
+            if (match && match.DP) {
               if (isMounted) {
-                setCustomerDp(data[0].DP);
+                setCustomerDp(match.DP);
                 setCurrentUser((prev: any) => {
-                  if (prev?.DP === data[0].DP) return prev;
-                  return { ...prev, DP: data[0].DP };
+                  if (prev?.DP === match.DP) return prev;
+                  return { ...prev, DP: match.DP };
                 });
               }
               try {
                 localStorage.setItem(`canteen_member_${cleanBd.toLowerCase()}`, JSON.stringify({
-                  dp: data[0].DP,
-                  due: Number(data[0].Due) || 0,
-                  rank: data[0].Rank,
-                  surname: data[0].Surname,
-                  contact: data[0].Contact,
+                  dp: match.DP,
+                  due: Number(match.Due) || 0,
+                  rank: match.Rank,
+                  surname: match.Surname,
+                  contact: match.Contact,
                   bdNo: cleanBd
                 }));
               } catch {}
@@ -248,18 +277,13 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           }
 
           // 2. Check by Surname/Name if BD No didn't yield a DP
-          if (currentUser.name && currentUser.name !== 'Guest') {
+          if (currentUser.name && currentUser.name !== 'Guest' && membersList.length > 0) {
             const parts = currentUser.name.trim().split(/\s+/);
-            const surname = parts[parts.length - 1];
+            const surname = (parts[parts.length - 1] || '').toLowerCase();
             if (surname) {
-              const { data } = await supabase
-                .from('Canteen_Member')
-                .select('DP, Surname, Rank')
-                .ilike('Surname', `%${surname}%`)
-                .limit(1);
-
-              if (data && data.length > 0 && data[0].DP) {
-                if (isMounted) setCustomerDp(data[0].DP);
+              const match = membersList.find((m: any) => String(m.Surname || '').toLowerCase().includes(surname) && m.DP);
+              if (match?.DP) {
+                if (isMounted) setCustomerDp(match.DP);
                 return;
               }
             }
@@ -300,28 +324,20 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         } catch {}
       }
 
-      if (!canteenMember && cleanBd) {
-        const { data, error } = await supabase
-          .from('Canteen_Member')
-          .select('*')
-          .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
-          .limit(1);
-        if (!error && data && data.length > 0) {
-          canteenMember = data[0];
+      if (!canteenMember && isFirebaseConfigured && !isFirestoreQuotaExceeded()) {
+        const fbMembers = await fetchCanteenMembersFromFirebase().catch(() => []);
+        if (cleanBd) {
+          canteenMember = fbMembers.find((m: any) => {
+            const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+            const mAid = String(m.airman_id || '').replace(/^airman-/i, '');
+            return mBd === cleanBd || mAid === cleanBd;
+          });
         }
-      }
-
-      if (!canteenMember && currentUser.name && currentUser.name !== 'Guest') {
-        const parts = currentUser.name.trim().split(/\s+/);
-        const surname = parts[parts.length - 1];
-        if (surname) {
-          const { data } = await supabase
-            .from('Canteen_Member')
-            .select('*')
-            .ilike('Surname', `%${surname}%`)
-            .limit(1);
-          if (data && data.length > 0) {
-            canteenMember = data[0];
+        if (!canteenMember && currentUser.name && currentUser.name !== 'Guest') {
+          const parts = currentUser.name.trim().split(/\s+/);
+          const surname = (parts[parts.length - 1] || '').toLowerCase();
+          if (surname) {
+            canteenMember = fbMembers.find((m: any) => String(m.Surname || '').toLowerCase().includes(surname));
           }
         }
       }
@@ -534,6 +550,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   };
 
   const handleLogout = () => {
+    window.dispatchEvent(new CustomEvent('baf_before_user_logout'));
     onBack();
   };
 
@@ -541,16 +558,27 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     if (loginTab === 'member') {
       try {
         setLoginError('Checking...');
-        const { data, error } = await supabase
-          .from('Canteen_Member')
-          .select('Surname, Rank, DP, Due')
-          .eq('BD No', loginInput)
-          .single();
+        const cleanLoginBd = loginInput.replace(/\D/g, '').trim();
+        let data: any = null;
+        try {
+          const rawAll = localStorage.getItem('canteen_members_cache');
+          if (rawAll) {
+            const parsed = JSON.parse(rawAll);
+            if (Array.isArray(parsed)) {
+              data = parsed.find((m: any) => String(m['BD No'] || m.bdNo || '').replace(/\D/g, '') === cleanLoginBd || String(m['BD No'] || '') === loginInput.trim());
+            }
+          }
+        } catch {}
+
+        if (!data && isFirebaseConfigured && !isFirestoreQuotaExceeded()) {
+          const fbMembers = await fetchCanteenMembersFromFirebase().catch(() => []);
+          data = fbMembers.find((m: any) => String(m['BD No'] || m.bdNo || '').replace(/\D/g, '') === cleanLoginBd || String(m['BD No'] || '') === loginInput.trim());
+        }
           
-        if (error || !data) {
+        if (!data) {
           setLoginError('Member not found. Check BD No.');
         } else {
-          setCurrentUser({ name: `${data.Rank} ${data.Surname}`, role: 'employee', bdNo: loginInput, DP: data.DP, due: data.Due });
+          setCurrentUser({ name: `${data.Rank || ''} ${data.Surname || ''}`.trim(), role: 'employee', bdNo: loginInput, DP: data.DP, due: data.Due });
           if (data.DP) setCustomerDp(data.DP);
           setActiveTab('personal_portal');
           setShowLogin(false);
@@ -712,41 +740,51 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             </h1>
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div className={`mt-3 flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl border ${
+            isQuotaFull
+              ? 'bg-amber-950/40 border-amber-500/40'
+              : 'bg-slate-900 border-slate-800'
+          }`}>
             <button
               type="button"
               onClick={() => setShowRestoreModal(true)}
               className="flex items-center space-x-2 min-w-0 text-left cursor-pointer hover:opacity-80 transition-opacity"
-              title="Supabase কোটা স্ট্যাটাস ও ডাটা রিকভারি সেন্টার খুলুন"
+              title="Firebase Cloud স্ট্যাটাস ও ডাটা রিকভারি সেন্টার খুলুন"
             >
               <Cloud className={`w-3.5 h-3.5 shrink-0 ${
-                cloudSyncStatus.status === 'syncing' 
-                  ? 'text-amber-400 animate-pulse' 
-                  : cloudSyncStatus.status === 'error' 
-                  ? 'text-rose-400' 
+                cloudSyncStatus.status === 'syncing'
+                  ? 'text-indigo-400 animate-pulse'
+                  : isQuotaFull
+                  ? 'text-amber-400'
+                  : cloudSyncStatus.status === 'error'
+                  ? 'text-rose-400'
                   : 'text-emerald-400'
               }`} />
               <div className="min-w-0">
-                <span className="text-[10px] font-black uppercase tracking-wider block text-slate-300 truncate">
-                  {cloudSyncStatus.status === 'syncing' 
-                    ? 'Cloud Syncing...' 
-                    : cloudSyncStatus.status === 'error' 
-                    ? 'Cloud Offline' 
-                    : 'Cloud Synced'}
+                <span className={`text-[10px] font-black uppercase tracking-wider block truncate ${
+                  isQuotaFull ? 'text-amber-300' : 'text-slate-300'
+                }`}>
+                  {cloudSyncStatus.status === 'syncing'
+                    ? 'Cloud Syncing...'
+                    : isQuotaFull
+                    ? `Local Cloud${pendingDeltaCount > 0 ? ` (${pendingDeltaCount})` : ''}`
+                    : cloudSyncStatus.status === 'error'
+                    ? 'Local Cloud'
+                    : 'Firebase Synced'}
                 </span>
                 {cloudSyncStatus.lastSyncTime && (
                   <span className="text-[9px] text-slate-500 block leading-tight">
-                    {cloudSyncStatus.lastSyncTime}
+                    {isQuotaFull ? 'Quota Exceeded Mode' : cloudSyncStatus.lastSyncTime}
                   </span>
                 )}
               </div>
             </button>
             <button
               onClick={() => pullAllCanteenDataFromCloud()}
-              title="Sync now from Cloud"
+              title="Sync now from Firebase"
               className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
             >
-              <RefreshCw className={`w-3 h-3 ${cloudSyncStatus.status === 'syncing' ? 'animate-spin text-amber-400' : ''}`} />
+              <RefreshCw className={`w-3 h-3 ${cloudSyncStatus.status === 'syncing' ? 'animate-spin text-indigo-400' : ''}`} />
             </button>
           </div>
         </div>
@@ -1091,10 +1129,22 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setShowRestoreModal(true)}
-                title="Cloud Status & Data Recovery"
-                className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition-transform cursor-pointer"
+                title={isQuotaFull ? 'Firebase Quota Exceeded - Using Local Cloud' : 'Firebase Cloud Status & Data Recovery'}
+                className={`w-8 h-8 rounded-full border flex items-center justify-center active:scale-95 transition-transform cursor-pointer ${
+                  isQuotaFull
+                    ? 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-300'
+                }`}
               >
-                <Cloud className={`w-4 h-4 ${cloudSyncStatus.status === 'syncing' ? 'text-amber-400 animate-pulse' : cloudSyncStatus.status === 'error' ? 'text-rose-400' : 'text-emerald-400'}`} />
+                <Cloud className={`w-4 h-4 ${
+                  cloudSyncStatus.status === 'syncing'
+                    ? 'text-indigo-400 animate-pulse'
+                    : isQuotaFull
+                    ? 'text-amber-400'
+                    : cloudSyncStatus.status === 'error'
+                    ? 'text-rose-400'
+                    : 'text-emerald-400'
+                }`} />
               </button>
               <div 
                 onClick={handleCustomerProfileClick}
@@ -1274,6 +1324,9 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           }}
         />
       )}
+
+      {/* Firebase Quota Exceeded Notification Modal */}
+      <FirebaseQuotaPopupModal />
       </div>
     </div>
   );

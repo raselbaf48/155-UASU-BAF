@@ -46,10 +46,12 @@ import { Logo155UASU } from './components/Logo155UASU';
 import { Shield, AlertCircle, X } from 'lucide-react';
 import { getCurrentUserSession, clearUserSession, UserSession } from './utils/authSession';
 import { localDb } from './services/localDatabase';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { isFirebaseConfigured } from './firebase';
+import { pushCanteenMembersToFirebase } from './services/firebaseFirestoreService';
 import { setLastUsedPortal } from './services/portalPreferenceService';
 import { initGoogleDriveAuth } from './services/googleDriveService';
 import { StandaloneBackupPage } from './components/StandaloneBackupPage';
+import { FirebaseQuotaPopupModal } from './components/FirebaseQuotaPopupModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('overview');
@@ -60,6 +62,7 @@ export default function App() {
     return saved === 'ADMIN' ? 'ADMIN' : 'USER';
   });
   const [userSession, setUserSession] = useState<UserSession | null>(() => getCurrentUserSession());
+  const [justLoggedIn, setJustLoggedIn] = useState<boolean>(false);
   const [standaloneView, setStandaloneView] = useState<'backup' | null>(null);
 
   useEffect(() => {
@@ -320,8 +323,10 @@ return () => mediaQuery.removeEventListener('change', listener);
   };
 
   const handleUserLogout = () => {
+    localDb.saveToFirebase(localDb.getDb(), true).catch(() => {});
     clearUserSession();
     setUserSession(null);
+    setJustLoggedIn(false);
     handleRoleChange('USER');
     setLastUsedPortal('Office');
   };
@@ -544,12 +549,12 @@ return () => mediaQuery.removeEventListener('change', listener);
           const created = await res.json();
           fetchAirmen();
 
-          // Auto add to Canteen Member DB
-          if (isSupabaseConfigured && created) {
+          // Auto add to Canteen Member DB (Firebase Firestore + Local Storage)
+          if (created) {
             try {
               const cleanBd = String(created.bdNo || airmanData.bdNo || '').replace(/\D/g, '');
               const canteenPayload = {
-                airman_id: created.id || (cleanBd ? `BD/${cleanBd}` : `airman-${cleanBd}`),
+                airman_id: created.id || (cleanBd ? `airman-${cleanBd}` : `airman-${Date.now()}`),
                 "BD No": cleanBd,
                 Rank: created.rank || airmanData.rank || 'LAC',
                 Surname: created.name || airmanData.name || 'Airman',
@@ -557,7 +562,9 @@ return () => mediaQuery.removeEventListener('change', listener);
                 Due: 0,
                 DP: null
               };
-              await supabase.from('Canteen_Member').upsert([canteenPayload], { onConflict: 'airman_id' });
+              if (isFirebaseConfigured) {
+                pushCanteenMembersToFirebase([canteenPayload]).catch(() => {});
+              }
             } catch (cErr) {
               console.warn('Auto add to Canteen table in App handleSave error:', cErr);
             }
@@ -614,6 +621,7 @@ return () => mediaQuery.removeEventListener('change', listener);
           airmen={airmen}
           onAuthenticated={() => {
             const sess = getCurrentUserSession();
+            setJustLoggedIn(true);
             setUserSession(sess);
             if (sess?.assignedRole) {
               handleRoleChange(sess.assignedRole as any);
@@ -621,8 +629,8 @@ return () => mediaQuery.removeEventListener('change', listener);
               handleRoleChange('USER');
             }
             
-            // Trigger instant data download from cloud after login
-            localDb.syncFromFirebase();
+            // Trigger instant data download from Firebase after login (shows quota popup if exceeded)
+            localDb.syncFromFirebase({ isLoginSync: true });
           }}
         />
 
@@ -865,6 +873,7 @@ return () => mediaQuery.removeEventListener('change', listener);
 
   return (
     <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+      <FirebaseQuotaPopupModal checkOnMount={justLoggedIn} />
       {renderNoticeModal()}
       {/* Left Sidebar Navigation */}
       <Sidebar

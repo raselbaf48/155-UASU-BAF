@@ -1,65 +1,284 @@
-import { supabase, isSupabaseConfigured } from '../supabase';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  setDoc,
+  getDoc,
+} from 'firebase/firestore';
+import {
+  db,
+  isFirebaseConfigured,
+  isFirestoreQuotaExceeded,
+  isQuotaExceededError,
+  setFirestoreQuotaExceeded,
+  CLIENT_SESSION_ID,
+} from '../firebase';
 import { Rank, FlightName } from '../types';
 
 export interface UserPresence {
   bdNo: string;
+  sessionId?: string;
   name: string;
   rank: Rank | string;
   flightName: FlightName | string;
   role?: string;
   lastActive?: string;
-  status?: string;
+  status?: 'online' | 'offline' | string;
   deviceInfo?: string;
+  page?: string;
+  currentActivity?: string;
 }
 
-const isQuotaExceeded = () => false;
+const PRESENCE_STORAGE_KEY = 'baf_presence';
+const ACTIVE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes considered online
 
-export const logUserLogin = async (user: Omit<UserPresence, 'lastActive' | 'status' | 'deviceInfo'>) => {
+const sanitizeDocId = (raw: string): string => {
+  const cleaned = String(raw || 'unknown')
+    .replace(/^BD\/?/i, '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_');
+  return (cleaned || 'unknown').slice(0, 120);
+};
+
+let cachedActiveUsers: UserPresence[] = (() => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(PRESENCE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+})();
+
+let currentLoggedBdNo: string | null = null;
+let lastBroadcastCount: number = -1;
+let firestorePresenceUnsub: (() => void) | null = null;
+let heartbeatTimer: any = null;
+let cleanupTimer: any = null;
+
+function filterRecentlyOnlineUsers(list: UserPresence[]): UserPresence[] {
+  const now = Date.now();
+  return (list || []).filter((u) => {
+    if (!u || !u.bdNo) return false;
+    if (u.status === 'offline') return false;
+    const t = u.lastActive ? Date.parse(u.lastActive) : 0;
+    if (!t || isNaN(t)) return false;
+    return now - t <= ACTIVE_WINDOW_MS;
+  });
+}
+
+function broadcastPresence(list: UserPresence[]) {
+  const onlineList = filterRecentlyOnlineUsers(list);
+  cachedActiveUsers = onlineList;
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(PRESENCE_STORAGE_KEY, JSON.stringify(onlineList));
+    } catch {}
+    window.dispatchEvent(new CustomEvent('baf_presence_updated', { detail: onlineList }));
+
+    const uniqueOnlineCount = new Set(onlineList.map((u) => sanitizeDocId(u.bdNo).toLowerCase())).size;
+    if (uniqueOnlineCount !== lastBroadcastCount) {
+      lastBroadcastCount = uniqueOnlineCount;
+      window.dispatchEvent(
+        new CustomEvent('baf_active_users_changed', {
+          detail: { count: uniqueOnlineCount, users: onlineList },
+        })
+      );
+    }
+  }
+}
+
+export function getActiveUsersCount(): number {
+  const online = filterRecentlyOnlineUsers(cachedActiveUsers);
+  const uniqueIds = new Set(online.map((u) => sanitizeDocId(u.bdNo).toLowerCase()));
+  return uniqueIds.size;
+}
+
+export function isMultiUserMode(): boolean {
+  return getActiveUsersCount() >= 2;
+}
+
+function ensurePresenceRealtimeSubscription() {
+  if (typeof window === 'undefined') return;
+  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return;
+  if (firestorePresenceUnsub) return;
+
+  try {
+    const presenceCol = collection(db, 'presence');
+    firestorePresenceUnsub = onSnapshot(
+      presenceCol,
+      (snapshot) => {
+        const cloudUsers: UserPresence[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as any;
+          if (d && d.bdNo) {
+            cloudUsers.push({
+              bdNo: String(d.bdNo),
+              sessionId: d.sessionId ? String(d.sessionId) : undefined,
+              name: String(d.name || 'User'),
+              rank: String(d.rank || ''),
+              flightName: String(d.flightName || ''),
+              role: d.role ? String(d.role) : 'USER',
+              status: d.status === 'offline' ? 'offline' : 'online',
+              page: d.page ? String(d.page) : '',
+              deviceInfo: d.deviceInfo ? String(d.deviceInfo) : '',
+              lastActive: String(d.lastActive || ''),
+            });
+          }
+        });
+        broadcastPresence(cloudUsers);
+      },
+      (err) => {
+        if (isQuotaExceededError(err)) {
+          setFirestoreQuotaExceeded(true, err?.message || 'Quota exceeded in presence listener');
+        }
+        stopPresenceRealtimeSubscription();
+      }
+    );
+
+    if (!cleanupTimer) {
+      cleanupTimer = setInterval(() => {
+        broadcastPresence(cachedActiveUsers);
+      }, 60 * 1000);
+    }
+  } catch (err) {
+    console.warn('[Presence] Snapshot setup warning:', err);
+  }
+}
+
+export function stopPresenceRealtimeSubscription() {
+  if (firestorePresenceUnsub) {
+    try {
+      firestorePresenceUnsub();
+    } catch {}
+    firestorePresenceUnsub = null;
+  }
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+    cleanupTimer = null;
+  }
+}
+
+function startPresenceHeartbeat(bdNo: string) {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (currentLoggedBdNo) {
+      updatePresence(currentLoggedBdNo, false, '');
+    }
+  }, 120 * 1000); // lightweight heartbeat every 2 minutes while active
+}
+
+export const logUserLogin = async (
+  user: Omit<UserPresence, 'lastActive' | 'status' | 'deviceInfo'>
+) => {
   try {
     const isMobile = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mobile');
-    
-    // In Supabase we'd write to a presence table or update user_profiles
-    // We'll update the user_profiles status instead since there's no presence table in Supabase schema requested
-    if (isSupabaseConfigured) {
-       await supabase.from('user_profiles').update({ 'Status': 'ACTIVE' }).eq('User ID', user.bdNo);
-    }
-    
-    // Also save locally
-    const existing = JSON.parse(localStorage.getItem('baf_presence') || '[]');
-    const newPresence = {
-      ...user,
-      lastActive: new Date().toISOString(),
+    const cleanBd = sanitizeDocId(user.bdNo);
+    currentLoggedBdNo = cleanBd;
+    const nowIso = new Date().toISOString();
+
+    const newPresence: UserPresence = {
+      bdNo: cleanBd,
+      sessionId: CLIENT_SESSION_ID,
+      name: String(user.name || 'User').slice(0, 200),
+      rank: String(user.rank || '').slice(0, 64),
+      flightName: String(user.flightName || '').slice(0, 64),
+      role: String(user.role || 'USER').slice(0, 32),
+      lastActive: nowIso,
       status: 'online',
-      deviceInfo: isMobile ? 'Mobile App' : 'Web Portal'
+      page: 'Portal',
+      deviceInfo: isMobile ? 'Mobile App' : 'Web Portal',
     };
-    const updated = [newPresence, ...existing.filter((p: any) => p.bdNo !== user.bdNo)];
-    localStorage.setItem('baf_presence', JSON.stringify(updated));
-    window.dispatchEvent(new CustomEvent('baf_presence_updated', { detail: updated }));
+
+    const existing = filterRecentlyOnlineUsers(cachedActiveUsers);
+    const updated = [newPresence, ...existing.filter((p) => sanitizeDocId(p.bdNo) !== cleanBd)];
+    broadcastPresence(updated);
+
+    startPresenceHeartbeat(cleanBd);
+    ensurePresenceRealtimeSubscription();
+
+    if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
+      try {
+        await setDoc(doc(db, 'presence', cleanBd), {
+          bdNo: newPresence.bdNo,
+          sessionId: CLIENT_SESSION_ID,
+          name: newPresence.name,
+          rank: newPresence.rank,
+          flightName: newPresence.flightName,
+          role: newPresence.role,
+          status: 'online',
+          page: newPresence.page,
+          deviceInfo: newPresence.deviceInfo,
+          lastActive: nowIso,
+        });
+      } catch (fbErr) {
+        if (isQuotaExceededError(fbErr)) {
+          setFirestoreQuotaExceeded(true, (fbErr as any)?.message);
+        }
+      }
+    }
   } catch (err) {
     console.error('Failed to log presence:', err);
   }
 };
 
-// Call this periodically to update last active OR on logout
-export const updatePresence = async (bdNo: string, isLogout: boolean = false, activity: string = '') => {
+// Call periodically to keep last active fresh OR on logout / close
+export const updatePresence = async (
+  bdNo: string,
+  isLogout: boolean = false,
+  activity: string = ''
+) => {
   try {
-    if (supabase) {
-       if (isLogout) {
-          // You could set status offline if we had a column, but 'ACTIVE' is the access status.
-          // In this case, we just ignore cloud presence for logout if there's no column.
-       }
-    }
-    const existing = JSON.parse(localStorage.getItem('baf_presence') || '[]');
-    const idx = existing.findIndex((p: any) => p.bdNo === bdNo);
-    if (idx !== -1) {
-      if (isLogout) {
-        existing.splice(idx, 1);
-      } else {
-        existing[idx].lastActive = new Date().toISOString();
-        if (activity) existing[idx].currentActivity = activity;
+    const cleanBd = sanitizeDocId(bdNo);
+    if (!cleanBd || cleanBd === 'unknown') return;
+    const nowIso = new Date().toISOString();
+
+    const existing = [...cachedActiveUsers];
+    const idx = existing.findIndex((p) => sanitizeDocId(p.bdNo) === cleanBd);
+    let targetRecord: UserPresence | null = idx !== -1 ? { ...existing[idx] } : null;
+
+    if (isLogout) {
+      if (idx !== -1) existing.splice(idx, 1);
+      if (currentLoggedBdNo === cleanBd) {
+        currentLoggedBdNo = null;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
       }
-      localStorage.setItem('baf_presence', JSON.stringify(existing));
-      window.dispatchEvent(new CustomEvent('baf_presence_updated', { detail: existing }));
+      broadcastPresence(existing);
+    } else if (targetRecord) {
+      targetRecord.lastActive = nowIso;
+      targetRecord.status = 'online';
+      if (activity) targetRecord.page = String(activity).slice(0, 128);
+      existing[idx] = targetRecord;
+      broadcastPresence(existing);
+    }
+
+    if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
+      try {
+        await setDoc(doc(db, 'presence', cleanBd), {
+          bdNo: cleanBd,
+          sessionId: CLIENT_SESSION_ID,
+          name: String(targetRecord?.name || 'User').slice(0, 200),
+          rank: String(targetRecord?.rank || '').slice(0, 64),
+          flightName: String(targetRecord?.flightName || '').slice(0, 64),
+          role: String(targetRecord?.role || 'USER').slice(0, 32),
+          status: isLogout ? 'offline' : 'online',
+          page: String(activity || targetRecord?.page || 'Portal').slice(0, 128),
+          deviceInfo: String(targetRecord?.deviceInfo || 'Web Portal').slice(0, 128),
+          lastActive: nowIso,
+        });
+      } catch (fbErr) {
+        if (isQuotaExceededError(fbErr)) {
+          setFirestoreQuotaExceeded(true, (fbErr as any)?.message);
+        }
+      }
     }
   } catch (err) {
     console.error('Failed to update presence:', err);
@@ -69,9 +288,13 @@ export const updatePresence = async (bdNo: string, isLogout: boolean = false, ac
 export const subscribeToActiveUsers = (callback: (users: any[]) => void) => {
   const handleLocal = (e: any) => callback(e.detail || []);
   window.addEventListener('baf_presence_updated', handleLocal);
-  
-  callback(JSON.parse(localStorage.getItem('baf_presence') || '[]'));
-  
+
+  if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
+    ensurePresenceRealtimeSubscription();
+  }
+
+  callback(filterRecentlyOnlineUsers(cachedActiveUsers));
+
   return () => {
     window.removeEventListener('baf_presence_updated', handleLocal);
   };
@@ -95,17 +318,24 @@ export const subscribeToLoginHistory = (callback: (logs: any[]) => void) => {
   };
 
   window.addEventListener('baf_login_history_updated', handleLocal);
-  
-  // Immediately provide local login history
+
   const initialLogs = getLocalLogs();
   callback(initialLogs);
-  
-  // Safely check cloud sync from app_settings if Supabase is configured
-  if (isSupabaseConfigured) {
-    supabase.from('app_settings').select('setting_value').eq('setting_key', 'baf_user_login_history').single().then(({ data, error }) => {
-      if (!error && data && data.setting_value) {
-        try {
-          const cloudLogs = JSON.parse(data.setting_value);
+
+  // Pull from Firestore app_settings/baf_user_login_history
+  if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
+    getDoc(doc(db, 'app_settings', 'baf_user_login_history'))
+      .then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          let cloudLogs: any[] = [];
+          if (Array.isArray(data?.value)) {
+            cloudLogs = data.value;
+          } else if (typeof data?.value === 'string') {
+            try {
+              cloudLogs = JSON.parse(data.value);
+            } catch {}
+          }
           if (Array.isArray(cloudLogs) && cloudLogs.length > 0) {
             const local = getLocalLogs();
             const map = new Map();
@@ -114,22 +344,38 @@ export const subscribeToLoginHistory = (callback: (logs: any[]) => void) => {
                 map.set(item.id, item);
               }
             });
-            const merged = Array.from(map.values()).sort((a: any, b: any) => {
-              const timeA = new Date(a.timestamp || 0).getTime();
-              const timeB = new Date(b.timestamp || 0).getTime();
-              return timeB - timeA;
-            }).slice(0, 30);
+            const merged = Array.from(map.values())
+              .sort((a: any, b: any) => {
+                const timeA = new Date(a.timestamp || 0).getTime();
+                const timeB = new Date(b.timestamp || 0).getTime();
+                return timeB - timeA;
+              })
+              .slice(0, 50);
             try {
               localStorage.setItem('baf_user_login_history', JSON.stringify(merged));
             } catch {}
             callback(merged);
           }
-        } catch {}
-      }
-    });
+        }
+      })
+      .catch((err) => {
+        if (isQuotaExceededError(err)) {
+          setFirestoreQuotaExceeded(true, err?.message);
+        }
+      });
   }
-  
+
   return () => {
     window.removeEventListener('baf_login_history_updated', handleLocal);
   };
 };
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('baf_firebase_quota_status', (e: any) => {
+    if (e?.detail?.exceeded) {
+      stopPresenceRealtimeSubscription();
+    } else if (currentLoggedBdNo) {
+      ensurePresenceRealtimeSubscription();
+    }
+  });
+}

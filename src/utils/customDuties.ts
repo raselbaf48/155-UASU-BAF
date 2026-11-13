@@ -2,6 +2,7 @@ import { DutyTypeInfo, DutyCategoryCode, FlightName, Rank } from '../types';
 
 export interface CustomDutyConfig extends DutyTypeInfo {
   isCustom: true;
+  allotmentType?: 'ratio' | 'equal';
 }
 
 const STORAGE_KEY = 'baf_custom_duties_v1';

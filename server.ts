@@ -828,11 +828,12 @@ async function startServer() {
 
   app.post('/api/full-system-restore', express.json({ limit: '50mb' }), (req, res) => {
     try {
-      const { baf_unit_data, canteen } = req.body || {};
+      const { baf_unit_data, canteen, localSettings, dutySettings, app_settings } = req.body || {};
       let restoredAirmen = 0;
       let restoredAssignments = 0;
       let restoredMembers = 0;
       let restoredTxs = 0;
+      let restoredSettings = 0;
 
       if (baf_unit_data && (baf_unit_data.airmen || baf_unit_data.assignments)) {
         saveDatabase(baf_unit_data, 'DATABASE_RESTORED');
@@ -852,19 +853,80 @@ async function startServer() {
         if (Array.isArray(canteen.expenses) && canteen.expenses.length > 0) {
           saveCanteenExpenses(canteen.expenses);
         }
-        if (Array.isArray(canteen.settings) && canteen.settings.length > 0) {
-          const currentSettings = loadAppSettings();
-          for (const s of canteen.settings) {
-            if (s && s.setting_key) {
-              currentSettings[s.setting_key] = {
-                setting_key: s.setting_key,
-                setting_value: typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value),
-                updated_at: s.updated_at || new Date().toISOString()
-              };
-            }
+      }
+
+      const currentSettings = loadAppSettings();
+      let settingsModified = false;
+      const nowIso = new Date().toISOString();
+      const skipSettingKeys = new Set([
+        'baf_local_storage_snapshot',
+        'baf_drive_cloud_snapshot',
+        'baf_backup_restore_history_v1',
+        'baf_155_uasu_v2_db',
+        'baf_database_v2',
+        'canteen_members',
+        'canteen_members_cache',
+        'canteen_transactions',
+        'canteen_txs',
+      ]);
+
+      const applySettingArray = (arr: any) => {
+        if (!Array.isArray(arr)) return;
+        for (const s of arr) {
+          if (s && s.setting_key && s.setting_value !== undefined && !skipSettingKeys.has(s.setting_key)) {
+            currentSettings[s.setting_key] = {
+              setting_key: s.setting_key,
+              setting_value: typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value),
+              updated_at: s.updated_at || nowIso
+            };
+            settingsModified = true;
+            restoredSettings++;
           }
-          saveAppSettings(currentSettings);
         }
+      };
+
+      if (canteen?.settings) applySettingArray(canteen.settings);
+      if (app_settings) applySettingArray(app_settings);
+
+      if (localSettings && typeof localSettings === 'object' && !Array.isArray(localSettings)) {
+        for (const [k, v] of Object.entries(localSettings)) {
+          if (k && v !== undefined && v !== null && !skipSettingKeys.has(k)) {
+            currentSettings[k] = {
+              setting_key: k,
+              setting_value: typeof v === 'string' ? v : JSON.stringify(v),
+              updated_at: nowIso
+            };
+            settingsModified = true;
+            restoredSettings++;
+          }
+        }
+      }
+
+      if (dutySettings && typeof dutySettings === 'object') {
+        const dutyKeyMap: Record<string, string> = {
+          dutyMatrix: 'baf_official_duty_matrix_v4',
+          dutyRatioHistory: 'baf_duty_ratio_history_v1',
+          customDuties: 'baf_custom_duties_v1',
+          distributionManpower: 'baf_duty_distribution_manpower',
+          distributionDisposals: 'baf_duty_distribution_disposals_master',
+          distributionTotalDuty: 'baf_duty_distribution_total_duty',
+          distributionCustomFlt: 'baf_duty_distribution_custom_flt',
+        };
+        for (const [field, storageKey] of Object.entries(dutyKeyMap)) {
+          if (dutySettings[field] !== undefined && dutySettings[field] !== null) {
+            currentSettings[storageKey] = {
+              setting_key: storageKey,
+              setting_value: typeof dutySettings[field] === 'string' ? dutySettings[field] : JSON.stringify(dutySettings[field]),
+              updated_at: nowIso
+            };
+            settingsModified = true;
+            restoredSettings++;
+          }
+        }
+      }
+
+      if (settingsModified) {
+        saveAppSettings(currentSettings);
       }
 
       broadcastRealtimeEvent('FULL_SYSTEM_RESTORED');
@@ -874,6 +936,7 @@ async function startServer() {
         restoredAssignments,
         restoredMembers,
         restoredTxs,
+        restoredSettings,
       });
     } catch (err: any) {
       console.error('Full system restore error:', err);

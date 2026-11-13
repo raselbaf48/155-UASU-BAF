@@ -25,6 +25,20 @@ export function addAssignmentToMap(assignmentMap: Map<string, DutyAssignment>, a
       assignmentMap.set(key, ass);
     } else {
       // Both exist. Determine priority.
+      if (existing.dutyCode === 'LEAVE' && ass.dutyCode !== 'LEAVE') return;
+      if (ass.dutyCode === 'LEAVE' && existing.dutyCode !== 'LEAVE') {
+        assignmentMap.set(key, ass);
+        return;
+      }
+      const isBase = (code: string) => !code || code === 'ON_PARADE' || code === 'PT' || code === 'PT_PARADE';
+      const existingIsBase = isBase(existing.dutyCode);
+      const newIsBase = isBase(ass.dutyCode);
+      if (existingIsBase && !newIsBase) {
+        assignmentMap.set(key, ass);
+        return;
+      }
+      if (!existingIsBase && newIsBase) return;
+
       const isDeployment = (code: string) => ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
       const existingIsDep = isDeployment(existing.dutyCode);
       const newIsDep = isDeployment(ass.dutyCode);
@@ -73,12 +87,13 @@ export function resolveAirmanDutyForDate(
 
   const currentAss = findAss(dateStr);
 
-  // Calculate previous date D-1
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() - 1);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  // Calculate previous date D-1 safely via UTC
+  const [yr, mo, da] = dateStr.split('-').map(Number);
+  const d = new Date(Date.UTC(yr, (mo || 1) - 1, da || 1));
+  d.setUTCDate(d.getUTCDate() - 1);
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   const yestStr = `${year}-${month}-${day}`;
 
   const yestAss = findAss(yestStr);
@@ -99,8 +114,9 @@ export function resolveAirmanDutyForDate(
   ) : false;
 
   const isDeployment = currentAss && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(currentAss.dutyCode);
+  const isBaseToday = currentAss && ['ON_PARADE', 'PT', 'PT_PARADE'].includes(currentAss.dutyCode);
 
-  if (!currentAss || isDeployment) {
+  if (!currentAss || isDeployment || isBaseToday) {
     if (isHeavyDuty) {
       let yCode = yestAss?.dutyCode === 'IDA' ? 'IDAC' : (yestAss?.dutyCode || 'DUTY');
       if (yCode === 'AIRPORT') yCode = 'APT';

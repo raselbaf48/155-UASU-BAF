@@ -1,0 +1,341 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared Validation Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOptStr(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptNum(data, field) {
+      return !(field in data) || data[field] is number;
+    }
+
+    function isOptBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function isValidNativeValue(val) {
+      return val is bool ||
+             val is number ||
+             (val is string && val.size() <= 900000) ||
+             (val is list && val.size() <= 5000) ||
+             (val is map && val.size() <= 5000);
+    }
+
+    // Entity Validation Blueprints
+    function isValidAirman(data) {
+      return data.keys().hasAll(['id', 'bdNo', 'name', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'id', 'bdNo', 'rank', 'name', 'fullName', 'flightName', 'trade',
+               'seniority', 'mobileNo', 'bloodGroup', 'addressBlock', 'permanentAddress',
+               'dateJoined', 'dateLeft', 'leaveReason', 'remarks', 'code', 'serNo',
+               'email', 'active', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.bdNo is string && data.bdNo.size() >= 1 && data.bdNo.size() <= 64 &&
+             data.name is string && data.name.size() <= 200 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             isOptStr(data, 'rank', 64) &&
+             isOptStr(data, 'fullName', 250) &&
+             isOptStr(data, 'flightName', 64) &&
+             isOptStr(data, 'trade', 128) &&
+             isOptNum(data, 'seniority') &&
+             isOptStr(data, 'mobileNo', 64) &&
+             isOptStr(data, 'bloodGroup', 32) &&
+             isOptStr(data, 'addressBlock', 500) &&
+             isOptStr(data, 'permanentAddress', 500) &&
+             isOptStr(data, 'dateJoined', 64) &&
+             isOptStr(data, 'dateLeft', 64) &&
+             isOptStr(data, 'leaveReason', 500) &&
+             isOptStr(data, 'remarks', 500) &&
+             isOptStr(data, 'code', 64) &&
+             isOptNum(data, 'serNo') &&
+             isOptStr(data, 'email', 200) &&
+             isOptBool(data, 'active');
+    }
+
+    function isValidDutyAssignment(data) {
+      return data.keys().hasAll(['id', 'airmanId', 'date', 'dutyCode', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'id', 'airmanId', 'date', 'dutyCode', 'dutyName', 'idaShift',
+               'proxyForFlight', 'disposalScope', 'notes', 'location',
+               'isOfficial', 'isCompleted', 'isDeleted', 'updatedAt', 'updatedBy'
+             ]) &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.airmanId is string && data.airmanId.size() >= 1 && data.airmanId.size() <= 128 &&
+             data.date is string && data.date.size() >= 4 && data.date.size() <= 32 &&
+             data.dutyCode is string && data.dutyCode.size() >= 1 && data.dutyCode.size() <= 64 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             isOptStr(data, 'dutyName', 200) &&
+             isOptStr(data, 'idaShift', 32) &&
+             isOptStr(data, 'proxyForFlight', 64) &&
+             isOptStr(data, 'disposalScope', 32) &&
+             isOptStr(data, 'notes', 1000) &&
+             isOptStr(data, 'location', 200) &&
+             isOptBool(data, 'isOfficial') &&
+             isOptBool(data, 'isCompleted') &&
+             isOptBool(data, 'isDeleted') &&
+             isOptStr(data, 'updatedBy', 128);
+    }
+
+    function isValidParadeStateLog(data) {
+      return data.keys().hasAll(['id', 'timestamp', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'id', 'actionType', 'airmanId', 'airmanName', 'airmanRank', 'airmanTrade',
+               'dutyCode', 'idaShift', 'fromDate', 'toDate', 'notes', 'description',
+               'timestamp', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.timestamp is string && data.timestamp.size() <= 64 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             isOptStr(data, 'actionType', 64) &&
+             isOptStr(data, 'airmanId', 128) &&
+             isOptStr(data, 'airmanName', 200) &&
+             isOptStr(data, 'airmanRank', 64) &&
+             isOptStr(data, 'airmanTrade', 128) &&
+             isOptStr(data, 'dutyCode', 64) &&
+             isOptStr(data, 'idaShift', 32) &&
+             isOptStr(data, 'fromDate', 32) &&
+             isOptStr(data, 'toDate', 32) &&
+             isOptStr(data, 'notes', 1000) &&
+             isOptStr(data, 'description', 2000);
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['id', 'bdNo', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'id', 'airmanId', 'bdNo', 'rank', 'name', 'mobileNo', 'flightName',
+               'trade', 'role', 'status', 'password', 'adminPass', 'ownerPass',
+               'detailOrder', 'detailedAt', 'detailedBy', 'remarks', 'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.bdNo is string && data.bdNo.size() >= 1 && data.bdNo.size() <= 64 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             isOptStr(data, 'airmanId', 128) &&
+             isOptStr(data, 'rank', 64) &&
+             isOptStr(data, 'name', 200) &&
+             isOptStr(data, 'mobileNo', 64) &&
+             isOptStr(data, 'flightName', 64) &&
+             isOptStr(data, 'trade', 128) &&
+             isOptStr(data, 'role', 32) &&
+             isOptStr(data, 'status', 32) &&
+             isOptStr(data, 'password', 128) &&
+             isOptStr(data, 'adminPass', 128) &&
+             isOptStr(data, 'ownerPass', 128) &&
+             isOptStr(data, 'detailOrder', 128) &&
+             isOptStr(data, 'detailedAt', 64) &&
+             isOptStr(data, 'detailedBy', 128) &&
+             isOptStr(data, 'remarks', 500);
+    }
+
+    function isValidAppSetting(data) {
+      return data.keys().hasAll(['settingKey', 'updatedAt']) &&
+             data.keys().hasOnly(['settingKey', 'value', 'updatedAt', 'updatedBy']) &&
+             data.settingKey is string && data.settingKey.size() >= 1 && data.settingKey.size() <= 200 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             (!('value' in data) || isValidNativeValue(data.value)) &&
+             isOptStr(data, 'updatedBy', 128);
+    }
+
+    function isValidCanteenMember(data) {
+      return data.keys().hasAll(['airman_id', 'bdNo', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'airman_id', 'bdNo', 'rank', 'surname', 'contact', 'due', 'dp',
+               'role', 'seniority', 'nameBn', 'rankBn', 'active', 'updatedAt'
+             ]) &&
+             data.airman_id is string && data.airman_id.size() >= 1 && data.airman_id.size() <= 128 &&
+             data.bdNo is string && data.bdNo.size() >= 1 && data.bdNo.size() <= 64 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             isOptStr(data, 'rank', 64) &&
+             isOptStr(data, 'surname', 200) &&
+             isOptStr(data, 'contact', 64) &&
+             isOptNum(data, 'due') &&
+             isOptStr(data, 'dp', 500000) &&
+             isOptStr(data, 'role', 64) &&
+             isOptNum(data, 'seniority') &&
+             isOptStr(data, 'nameBn', 200) &&
+             isOptStr(data, 'rankBn', 100) &&
+             isOptBool(data, 'active');
+    }
+
+    function isValidCanteenData(data) {
+      return data.keys().hasAll(['docKey', 'updatedAt']) &&
+             data.keys().hasOnly(['docKey', 'value', 'updatedAt', 'updatedBy']) &&
+             data.docKey is string && data.docKey.size() >= 1 && data.docKey.size() <= 128 &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             (!('value' in data) || isValidNativeValue(data.value)) &&
+             isOptStr(data, 'updatedBy', 128);
+    }
+
+    function isValidPresence(data) {
+      return data.keys().hasAll(['bdNo', 'sessionId', 'status', 'lastActive']) &&
+             data.keys().hasOnly([
+               'bdNo', 'sessionId', 'name', 'rank', 'flightName', 'role',
+               'status', 'page', 'deviceInfo', 'lastActive'
+             ]) &&
+             data.bdNo is string && data.bdNo.size() >= 1 && data.bdNo.size() <= 64 &&
+             data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.status is string && data.status in ['online', 'offline'] &&
+             data.lastActive is string && data.lastActive.size() <= 64 &&
+             isOptStr(data, 'name', 200) &&
+             isOptStr(data, 'rank', 64) &&
+             isOptStr(data, 'flightName', 64) &&
+             isOptStr(data, 'role', 32) &&
+             isOptStr(data, 'page', 128) &&
+             isOptStr(data, 'deviceInfo', 128);
+    }
+
+    function isValidSyncManifest(data) {
+      return data.keys().hasAll(['id', 'revision', 'updatedAt']) &&
+             data.keys().hasOnly([
+               'id', 'revision', 'updatedAt', 'updatedBySessionId',
+               'updatedByBdNo', 'lastReason', 'changedCollections'
+             ]) &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+             data.revision is number &&
+             data.updatedAt is string && data.updatedAt.size() <= 64 &&
+             isOptStr(data, 'updatedBySessionId', 128) &&
+             isOptStr(data, 'updatedByBdNo', 64) &&
+             isOptStr(data, 'lastReason', 200) &&
+             (!('changedCollections' in data) || (
+               data.changedCollections is list &&
+               data.changedCollections.size() <= 20 &&
+               (data.changedCollections.size() == 0 || data.changedCollections[0] is string)
+             ));
+    }
+
+    // Collection Rules
+    match /airmen/{airmanId} {
+      allow get: if isValidId(airmanId);
+      allow list: if request.time != null;
+      allow create: if isValidId(airmanId) && isValidAirman(incoming());
+      allow update: if isValidId(airmanId) && isValidAirman(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'bdNo', 'rank', 'name', 'fullName', 'flightName', 'trade',
+                         'seniority', 'mobileNo', 'bloodGroup', 'addressBlock', 'permanentAddress',
+                         'dateJoined', 'dateLeft', 'leaveReason', 'remarks', 'code', 'serNo',
+                         'email', 'active', 'updatedAt'
+                       ]);
+      allow delete: if isValidId(airmanId);
+    }
+
+    match /duty_assignments/{assignmentId} {
+      allow get: if isValidId(assignmentId);
+      allow list: if request.time != null;
+      allow create: if isValidId(assignmentId) && isValidDutyAssignment(incoming());
+      allow update: if isValidId(assignmentId) && isValidDutyAssignment(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'airmanId', 'date', 'dutyCode', 'dutyName', 'idaShift',
+                         'proxyForFlight', 'disposalScope', 'notes', 'location',
+                         'isOfficial', 'isCompleted', 'isDeleted', 'updatedAt', 'updatedBy'
+                       ]);
+      allow delete: if isValidId(assignmentId);
+    }
+
+    match /parade_states/{logId} {
+      allow get: if isValidId(logId);
+      allow list: if request.time != null;
+      allow create: if isValidId(logId) && isValidParadeStateLog(incoming());
+      allow update: if isValidId(logId) && isValidParadeStateLog(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'actionType', 'airmanId', 'airmanName', 'airmanRank', 'airmanTrade',
+                         'dutyCode', 'idaShift', 'fromDate', 'toDate', 'notes', 'description',
+                         'timestamp', 'updatedAt'
+                       ]);
+      allow delete: if isValidId(logId);
+    }
+
+    match /user_profiles/{profileId} {
+      allow get: if isValidId(profileId);
+      allow list: if request.time != null;
+      allow create: if isValidId(profileId) && isValidUserProfile(incoming());
+      allow update: if isValidId(profileId) && isValidUserProfile(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'airmanId', 'bdNo', 'rank', 'name', 'mobileNo', 'flightName',
+                         'trade', 'role', 'status', 'password', 'adminPass', 'ownerPass',
+                         'detailOrder', 'detailedAt', 'detailedBy', 'remarks', 'updatedAt'
+                       ]);
+      allow delete: if isValidId(profileId);
+    }
+
+    match /app_settings/{settingKey} {
+      allow get: if isValidId(settingKey);
+      allow list: if request.time != null;
+      allow create: if isValidId(settingKey) && isValidAppSetting(incoming());
+      allow update: if isValidId(settingKey) && isValidAppSetting(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'settingKey', 'value', 'updatedAt', 'updatedBy'
+                       ]);
+      allow delete: if isValidId(settingKey);
+    }
+
+    match /canteen_members/{memberId} {
+      allow get: if isValidId(memberId);
+      allow list: if request.time != null;
+      allow create: if isValidId(memberId) && isValidCanteenMember(incoming());
+      allow update: if isValidId(memberId) && isValidCanteenMember(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'airman_id', 'bdNo', 'rank', 'surname', 'contact', 'due', 'dp',
+                         'role', 'seniority', 'nameBn', 'rankBn', 'active', 'updatedAt'
+                       ]);
+      allow delete: if isValidId(memberId);
+    }
+
+    match /canteen_data/{docKey} {
+      allow get: if isValidId(docKey);
+      allow list: if request.time != null;
+      allow create: if isValidId(docKey) && isValidCanteenData(incoming());
+      allow update: if isValidId(docKey) && isValidCanteenData(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'docKey', 'value', 'updatedAt', 'updatedBy'
+                       ]);
+      allow delete: if isValidId(docKey);
+    }
+
+    match /presence/{bdNo} {
+      allow get: if isValidId(bdNo);
+      allow list: if request.time != null;
+      allow create: if isValidId(bdNo) && isValidPresence(incoming());
+      allow update: if isValidId(bdNo) && isValidPresence(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'bdNo', 'sessionId', 'name', 'rank', 'flightName', 'role',
+                         'status', 'page', 'deviceInfo', 'lastActive'
+                       ]);
+      allow delete: if isValidId(bdNo);
+    }
+
+    match /system_meta/{metaId} {
+      allow get: if isValidId(metaId);
+      allow list: if request.time != null;
+      allow create: if isValidId(metaId) && isValidSyncManifest(incoming());
+      allow update: if isValidId(metaId) && isValidSyncManifest(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'id', 'revision', 'updatedAt', 'updatedBySessionId',
+                         'updatedByBdNo', 'lastReason', 'changedCollections'
+                       ]);
+      allow delete: if false;
+    }
+
+    match /test/{testId} {
+      allow get: if isValidId(testId);
+      allow write: if false;
+    }
+  }
+}

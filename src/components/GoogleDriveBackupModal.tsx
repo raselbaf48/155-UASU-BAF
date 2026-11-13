@@ -32,6 +32,9 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     metadata: any;
     content: any;
   } | null>(null);
+  const [isRestoringProgress, setIsRestoringProgress] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState(0);
+  const [restoreStage, setRestoreStage] = useState('');
 
   // Live data stats
   const [systemStats, setSystemStats] = useState<{
@@ -131,36 +134,70 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     setIsLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
-    setStatusMessage('Google ড্রাইভ থেকে ব্যাকআপ অনুসন্ধান ও ডাউনলোড হচ্ছে...');
+    setStatusMessage('Searching and downloading backup from Google Drive...');
 
     try {
       const backup = await fetchBackupFromDrive();
       setPendingRestoreData(backup);
       setShowRestoreConfirm(true);
     } catch (err: any) {
-      setErrorMessage(err.message || 'ড্রাইভ থেকে ব্যাকআপ খুঁজে পাওয়া যায়নি।');
+      setErrorMessage(err.message || 'No backup found on Google Drive.');
     } finally {
       setIsLoading(false);
       setStatusMessage('');
     }
   };
 
-  const handleConfirmRestore = async () => {
-    if (!pendingRestoreData?.content) return;
+  const runRestoreWithCircleProgress = async (payload: any, sourceLabel: string) => {
     setIsLoading(true);
-    setShowRestoreConfirm(false);
-    setStatusMessage('ডাটাবেস রিস্টোর ও সিঙ্ক করা হচ্ছে...');
+    setIsRestoringProgress(true);
+    setRestoreProgress(4);
+    setRestoreStage('Starting database and settings restore...');
+    setStatusMessage(sourceLabel);
+
+    let targetPercent = 8;
+    const progressTimer = window.setInterval(() => {
+      setRestoreProgress((prev) => {
+        if (prev < targetPercent) {
+          const step = Math.max(1, Math.ceil((targetPercent - prev) * 0.35));
+          return Math.min(targetPercent, prev + step);
+        }
+        return prev;
+      });
+    }, 45);
 
     try {
-      const res = await restoreFromBackupData(pendingRestoreData.content);
-      setSuccessMessage(`সফলভাবে রিস্টোর সম্পন্ন! বিমানসেনা: ${res.restoredAirmen} জন, ডিউটি: ${res.restoredAssignments} টি, ক্যান্টিন মেম্বার: ${res.restoredMembers} জন`);
-      setPendingRestoreData(null);
+      const res = await restoreFromBackupData(payload, (pct, stageLabel) => {
+        targetPercent = Math.max(targetPercent, pct);
+        setRestoreStage(stageLabel);
+        setStatusMessage(`${stageLabel} (${pct}%)`);
+      });
+      targetPercent = 100;
+      setRestoreProgress(100);
+      setRestoreStage('Database and settings restore completed!');
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      setSuccessMessage(
+        `Restore complete! Airmen: ${res.restoredAirmen}, Duty Records: ${res.restoredAssignments}, Settings: ${res.restoredSettings}`
+      );
       refreshStats();
-    } catch (err: any) {
-      setErrorMessage(err.message || 'রিস্টোর প্রক্রিয়া ব্যর্থ হয়েছে।');
     } finally {
+      window.clearInterval(progressTimer);
       setIsLoading(false);
+      setIsRestoringProgress(false);
+      setRestoreProgress(0);
+      setRestoreStage('');
       setStatusMessage('');
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!pendingRestoreData?.content) return;
+    setShowRestoreConfirm(false);
+    try {
+      await runRestoreWithCircleProgress(pendingRestoreData.content, 'Restoring and syncing database...');
+      setPendingRestoreData(null);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Restore process failed.');
     }
   };
 
@@ -172,19 +209,10 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
     reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (!window.confirm(`ফাইল থেকে ডাটাবেস রিস্টোর করতে চান? এটি বর্তমান ডাটা আপডেট করবে।`)) {
-          return;
-        }
-        setIsLoading(true);
-        setStatusMessage('ফাইল থেকে ডাটা রিস্টোর হচ্ছে...');
-        const res = await restoreFromBackupData(parsed);
-        setSuccessMessage(`ফাইল থেকে সফলভাবে রিস্টোর হয়েছে! ${res.message}`);
-        refreshStats();
+        await runRestoreWithCircleProgress(parsed, 'Restoring data and settings from file...');
       } catch (err: any) {
-        setErrorMessage('অবৈধ ব্যাকআপ ফাইল ফরম্যাট! JSON ফাইল নির্বাচন করুন।');
+        setErrorMessage(err?.message || 'Invalid backup file format! Please select a valid JSON file.');
       } finally {
-        setIsLoading(false);
-        setStatusMessage('');
         e.target.value = '';
       }
     };
@@ -389,7 +417,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
-                  ড্রাইভ থেকে রিস্টোর করুন
+                  Restore from Drive
                 </button>
               </div>
             </div>
@@ -417,7 +445,7 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                 <svg className="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
-                JSON ফাইল থেকে রিস্টোর
+                Restore from JSON File
                 <input
                   type="file"
                   accept=".json"
@@ -456,26 +484,26 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                 </svg>
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">ড্রাইভ থেকে রিস্টোর নিশ্চিতকরণ</h3>
-                <p className="text-xs text-slate-400">ফাইল: {pendingRestoreData.metadata.name}</p>
+                <h3 className="font-bold text-white text-base">Confirm Drive Restore</h3>
+                <p className="text-xs text-slate-400">File: {pendingRestoreData.metadata.name}</p>
               </div>
             </div>
 
             <div className="p-3.5 bg-slate-800/80 rounded-xl border border-slate-700/80 text-xs space-y-2">
-              <div className="text-slate-300 font-medium">ড্রাইভ ব্যাকআপের বিস্তারিত:</div>
+              <div className="text-slate-300 font-medium">Drive Backup Summary:</div>
               <div className="grid grid-cols-2 gap-2 text-slate-400">
-                <div>বিমানসেনা: <strong className="text-emerald-400">{pendingRestoreData.content?.baf_unit_data?.airmen?.length || pendingRestoreData.content?.airmen?.length || 0} জন</strong></div>
-                <div>ডিউটি রেকর্ড: <strong className="text-sky-400">{Object.values(pendingRestoreData.content?.baf_unit_data?.assignments || pendingRestoreData.content?.assignments || {}).reduce((acc: number, arr: any) => acc + (arr?.length || 0), 0)} টি</strong></div>
-                <div>ক্যান্টিন সদস্য: <strong className="text-amber-400">{pendingRestoreData.content?.canteen?.members?.length || pendingRestoreData.content?.canteen_members?.length || 0} জন</strong></div>
-                <div>ক্যান্টিন লেনদেন: <strong className="text-indigo-400">{pendingRestoreData.content?.canteen?.transactions?.length || pendingRestoreData.content?.canteen_transactions?.length || 0} টি</strong></div>
+                <div>Airmen: <strong className="text-emerald-400">{pendingRestoreData.content?.baf_unit_data?.airmen?.length || pendingRestoreData.content?.airmen?.length || 0}</strong></div>
+                <div>Duty Records: <strong className="text-sky-400">{Object.values(pendingRestoreData.content?.baf_unit_data?.assignments || pendingRestoreData.content?.assignments || {}).reduce((acc: number, arr: any) => acc + (arr?.length || 0), 0)}</strong></div>
+                <div>Canteen Members: <strong className="text-amber-400">{pendingRestoreData.content?.canteen?.members?.length || pendingRestoreData.content?.canteen_members?.length || 0}</strong></div>
+                <div>Transactions: <strong className="text-indigo-400">{pendingRestoreData.content?.canteen?.transactions?.length || pendingRestoreData.content?.canteen_transactions?.length || 0}</strong></div>
               </div>
               <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-700">
-                সর্বশেষ পরিবর্তনের সময়: {formatTimestamp(pendingRestoreData.metadata.modifiedTime)}
+                Last Modified: {formatTimestamp(pendingRestoreData.metadata.modifiedTime)}
               </div>
             </div>
 
             <p className="text-xs text-amber-200/90 leading-relaxed">
-              আপনি কি নিশ্চিত যে এই ব্যাকআপটি বর্তমান সিস্টেমে রিস্টোর করতে চান? এটি বর্তমান ডাটাবেসের তথ্য আপডেট করবে।
+              Are you sure you want to restore this backup? It will update your current database and settings.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -487,15 +515,59 @@ export const GoogleDriveBackupModal: React.FC<GoogleDriveBackupModalProps> = ({
                 disabled={isLoading}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition"
               >
-                বাতিল করুন
+                Cancel
               </button>
               <button
                 onClick={handleConfirmRestore}
                 disabled={isLoading}
                 className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-amber-900/30"
               >
-                হ্যাঁ, রিস্টোর করুন
+                Yes, Restore Now
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Circle Percentage Progress Modal while Restoring */}
+      {isRestoringProgress && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="w-full max-w-sm bg-slate-900 border border-emerald-500/40 rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center space-y-5">
+            <div className="space-y-1">
+              <h3 className="text-base font-black text-white">Restoring Database & Settings</h3>
+              <p className="text-xs text-slate-400">Please wait, do not close or refresh...</p>
+            </div>
+            <div className="relative w-36 h-36 flex items-center justify-center">
+              <svg className="w-36 h-36 -rotate-90 transform" viewBox="0 0 120 120">
+                <defs>
+                  <linearGradient id="driveRestoreCircleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#10b981" />
+                    <stop offset="50%" stopColor="#06b6d4" />
+                    <stop offset="100%" stopColor="#f59e0b" />
+                  </linearGradient>
+                </defs>
+                <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(51, 65, 85, 0.45)" strokeWidth="10" />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="50"
+                  fill="none"
+                  stroke={restoreProgress >= 100 ? '#10b981' : 'url(#driveRestoreCircleGrad)'}
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                  strokeDasharray={2 * Math.PI * 50}
+                  strokeDashoffset={2 * Math.PI * 50 * (1 - Math.min(100, Math.max(0, restoreProgress)) / 100)}
+                  className="transition-all duration-150 ease-out"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl font-black font-mono text-white tracking-tight">{restoreProgress}%</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                  {restoreProgress >= 100 ? 'Complete' : 'Restoring'}
+                </span>
+              </div>
+            </div>
+            <div className="w-full bg-slate-800/80 border border-slate-700 rounded-2xl px-4 py-2.5 text-xs font-semibold text-slate-200">
+              {restoreStage || statusMessage || 'Restoring data...'}
             </div>
           </div>
         </div>

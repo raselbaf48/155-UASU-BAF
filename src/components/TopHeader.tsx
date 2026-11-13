@@ -1,32 +1,82 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, KeyRound, ShieldCheck, LogOut, User, Cloud, CloudOff, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Menu, ShieldCheck, LogOut, User, Cloud, CloudOff } from 'lucide-react';
 import { SidebarTab } from './Sidebar';
 import { UserRole } from '../types';
 import { UserSession } from '../utils/authSession';
+import { isFirebaseConfigured, isFirestoreQuotaExceeded } from '../firebase';
+import { getFirebaseSyncState } from '../services/localDatabase';
+import { getPendingDeltaCount } from '../services/firebaseFirestoreService';
 
-const BackupRestoreButton = () => {
+const CloudSyncButton = () => {
+  const [syncState, setSyncState] = useState(() => getFirebaseSyncState());
+  const [quotaExceeded, setQuotaExceeded] = useState(() => isFirestoreQuotaExceeded());
+  const [pendingCount, setPendingCount] = useState(() => getPendingDeltaCount());
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+
+  useEffect(() => {
+    const refresh = () => {
+      setSyncState(getFirebaseSyncState());
+      setQuotaExceeded(isFirestoreQuotaExceeded());
+      setPendingCount(getPendingDeltaCount());
+      setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true);
+    };
+
+    window.addEventListener('d1_sync_update', refresh);
+    window.addEventListener('baf_firebase_quota_status', refresh);
+    window.addEventListener('baf_pending_delta_updated', refresh);
+    window.addEventListener('baf_sync_logs_updated', refresh);
+    window.addEventListener('online', refresh);
+    window.addEventListener('offline', refresh);
+
+    return () => {
+      window.removeEventListener('d1_sync_update', refresh);
+      window.removeEventListener('baf_firebase_quota_status', refresh);
+      window.removeEventListener('baf_pending_delta_updated', refresh);
+      window.removeEventListener('baf_sync_logs_updated', refresh);
+      window.removeEventListener('online', refresh);
+      window.removeEventListener('offline', refresh);
+    };
+  }, []);
+
   const handleOpenBackup = () => {
     window.dispatchEvent(new CustomEvent('baf_open_standalone_view', { detail: 'backup' }));
   };
+
+  const isSyncing = syncState.status === 'syncing';
+
+  let iconColorClass = 'text-emerald-500 dark:text-emerald-400';
+  let tooltip = 'Firebase Cloud Synced (সব ডাটা আপডেটেড) — ক্লিক করে Local ও Firebase Cloud ব্যাকআপ, রিস্টোর ও লগ দেখুন';
+  let IconComponent: any = Cloud;
+
+  if (quotaExceeded) {
+    iconColorClass = 'text-amber-500 dark:text-amber-400';
+    tooltip = `Firebase Quota শেষ • Local Cloud চালু আছে${pendingCount > 0 ? ` (${pendingCount}টি পরিবর্তন অপেক্ষমাণ)` : ''} — ক্লিক করে ব্যাকআপ/রিস্টোর ও লগ দেখুন`;
+    IconComponent = Cloud;
+  } else if (isSyncing) {
+    iconColorClass = 'text-indigo-500 dark:text-indigo-400 animate-pulse';
+    tooltip = 'Firebase Cloud Syncing চলছে... — ক্লিক করে ব্যাকআপ, রিস্টোর ও লগ দেখুন';
+    IconComponent = Cloud;
+  } else if (!isOnline || !isFirebaseConfigured) {
+    iconColorClass = 'text-rose-500 dark:text-rose-400';
+    tooltip = !isOnline
+      ? 'ইন্টারনেট অফলাইন (Local Cloud সক্রিয়) — ক্লিক করে ব্যাকআপ/রিস্টোর ও লগ দেখুন'
+      : 'Firebase কনফিগার করা নেই — ক্লিক করে Local Cloud দেখুন';
+    IconComponent = CloudOff;
+  } else if (pendingCount > 0) {
+    iconColorClass = 'text-sky-500 dark:text-sky-400';
+    tooltip = `${pendingCount}টি পরিবর্তন ক্লাউড ব্যাকআপের জন্য অপেক্ষমাণ — ক্লিক করে ম্যানুয়াল ব্যাকআপ/রিস্টোর ও লগ দেখুন`;
+    IconComponent = Cloud;
+  }
 
   return (
     <button
       type="button"
       onClick={handleOpenBackup}
-      className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/70 shadow-xs transition-all text-xs cursor-pointer group"
-      title="সিস্টেম ব্যাকআপ ও রিস্টোর পোর্টাল (Local Storage & Offline JSON)"
+      className={`p-1.5 rounded-lg transition-transform hover:scale-110 active:scale-95 cursor-pointer bg-transparent border-0 shadow-none ${iconColorClass}`}
+      title={tooltip}
+      aria-label="Cloud Backup, Restore & Sync Logs"
     >
-      <div className="w-5 h-5 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
-        <RefreshCw className="w-3.5 h-3.5" />
-      </div>
-
-      <span className="hidden md:inline font-bold text-slate-700 dark:text-slate-200">
-        Backup / Restore
-      </span>
-
-      <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30">
-        Local Offline
-      </span>
+      <IconComponent strokeWidth={2.35} className="w-[22px] h-[22px]" />
     </button>
   );
 };
@@ -121,7 +171,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Upper Right: User Profile & Admin Option */}
         <div className="flex items-center space-x-2.5">
-          <BackupRestoreButton />
+          <CloudSyncButton />
           {/* User Session Info Badge */}
           {userSession && (
             <div className="hidden sm:flex items-center space-x-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 px-2.5 py-1.5 rounded-xl">

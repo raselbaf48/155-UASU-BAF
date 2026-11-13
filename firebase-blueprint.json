@@ -1,0 +1,234 @@
+{
+  "entities": {
+    "AirmanRecord": {
+      "title": "AirmanRecord",
+      "description": "Personnel record in the 155 UASU BAF Nominal Roll and Biodata Register",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Canonical airman ID (e.g. BD/48456)" },
+        "bdNo": { "type": "string", "maxLength": 64, "description": "Service BD number" },
+        "rank": { "type": "string", "maxLength": 64, "description": "Military rank" },
+        "name": { "type": "string", "maxLength": 200, "description": "Short display surname" },
+        "fullName": { "type": "string", "maxLength": 250, "description": "Full official name" },
+        "flightName": { "type": "string", "maxLength": 64, "description": "Assigned flight" },
+        "trade": { "type": "string", "maxLength": 128, "description": "Trade specialization" },
+        "seniority": { "type": "number", "description": "Seniority order number" },
+        "mobileNo": { "type": "string", "maxLength": 64, "description": "Contact mobile number" },
+        "bloodGroup": { "type": "string", "maxLength": 32, "description": "Blood group" },
+        "addressBlock": { "type": "string", "maxLength": 500, "description": "Present address" },
+        "permanentAddress": { "type": "string", "maxLength": 500, "description": "Permanent address" },
+        "dateJoined": { "type": "string", "maxLength": 64, "description": "Date of posting in" },
+        "dateLeft": { "type": "string", "maxLength": 64, "description": "Date of posting out" },
+        "leaveReason": { "type": "string", "maxLength": 500, "description": "Reason for leave or inactive status" },
+        "remarks": { "type": "string", "maxLength": 500, "description": "General remarks" },
+        "code": { "type": "string", "maxLength": 64, "description": "Short code" },
+        "serNo": { "type": "number", "description": "Serial number" },
+        "email": { "type": "string", "maxLength": 200, "description": "Email address" },
+        "active": { "type": "boolean", "description": "Active strength flag" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "ISO timestamp of last edit" }
+      },
+      "required": ["id", "bdNo", "name", "updatedAt"]
+    },
+    "DutyAssignmentRecord": {
+      "title": "DutyAssignmentRecord",
+      "description": "Single daily duty, leave, TDY, or disposal assignment for an airman",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Deterministic assignment document ID" },
+        "airmanId": { "type": "string", "maxLength": 128, "description": "Target airman ID" },
+        "date": { "type": "string", "maxLength": 32, "description": "YYYY-MM-DD assignment date" },
+        "dutyCode": { "type": "string", "maxLength": 64, "description": "Duty or disposal code" },
+        "dutyName": { "type": "string", "maxLength": 200, "description": "Optional custom duty display name" },
+        "idaShift": { "type": "string", "maxLength": 32, "description": "IDAC shift label" },
+        "proxyForFlight": { "type": "string", "maxLength": 64, "description": "Proxy flight if covering another flight" },
+        "disposalScope": { "type": "string", "maxLength": 32, "description": "ALL, PARADE, PT, or NIGHT_COUNT" },
+        "notes": { "type": "string", "maxLength": 1000, "description": "Remarks or details" },
+        "location": { "type": "string", "maxLength": 200, "description": "Location or unit" },
+        "isOfficial": { "type": "boolean", "description": "Official seeded roster flag" },
+        "isCompleted": { "type": "boolean", "description": "Completion flag" },
+        "isDeleted": { "type": "boolean", "description": "Soft-delete tombstone for incremental sync" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "ISO timestamp of last modification" },
+        "updatedBy": { "type": "string", "maxLength": 128, "description": "BD No of user who modified the record" }
+      },
+      "required": ["id", "airmanId", "date", "dutyCode", "updatedAt"]
+    },
+    "ParadeStateLogRecord": {
+      "title": "ParadeStateLogRecord",
+      "description": "Activity history audit log entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Unique log ID" },
+        "actionType": { "type": "string", "maxLength": 64, "description": "Action category" },
+        "airmanId": { "type": "string", "maxLength": 128, "description": "Related airman ID" },
+        "airmanName": { "type": "string", "maxLength": 200, "description": "Display name" },
+        "airmanRank": { "type": "string", "maxLength": 64, "description": "Rank" },
+        "airmanTrade": { "type": "string", "maxLength": 128, "description": "Trade" },
+        "dutyCode": { "type": "string", "maxLength": 64, "description": "Related duty code" },
+        "idaShift": { "type": "string", "maxLength": 32, "description": "Shift" },
+        "fromDate": { "type": "string", "maxLength": 32, "description": "Start date" },
+        "toDate": { "type": "string", "maxLength": 32, "description": "End date" },
+        "notes": { "type": "string", "maxLength": 1000, "description": "Log notes" },
+        "description": { "type": "string", "maxLength": 2000, "description": "Detailed description" },
+        "timestamp": { "type": "string", "maxLength": 64, "description": "Event ISO timestamp" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Sync ISO timestamp" }
+      },
+      "required": ["id", "timestamp", "updatedAt"]
+    },
+    "UserProfileRecord": {
+      "title": "UserProfileRecord",
+      "description": "Portal login credentials and role authorization profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Profile ID" },
+        "airmanId": { "type": "string", "maxLength": 128, "description": "Linked airman ID" },
+        "bdNo": { "type": "string", "maxLength": 64, "description": "BD No login ID" },
+        "rank": { "type": "string", "maxLength": 64, "description": "Rank" },
+        "name": { "type": "string", "maxLength": 200, "description": "Name" },
+        "mobileNo": { "type": "string", "maxLength": 64, "description": "Mobile number" },
+        "flightName": { "type": "string", "maxLength": 64, "description": "Flight" },
+        "trade": { "type": "string", "maxLength": 128, "description": "Trade" },
+        "role": { "type": "string", "maxLength": 32, "description": "USER, ADMIN, SUPER_ADMIN, OWNER" },
+        "status": { "type": "string", "maxLength": 32, "description": "ACTIVE or SUSPENDED" },
+        "password": { "type": "string", "maxLength": 128, "description": "User login PIN" },
+        "adminPass": { "type": "string", "maxLength": 128, "description": "Admin login PIN" },
+        "ownerPass": { "type": "string", "maxLength": 128, "description": "Owner login PIN" },
+        "detailOrder": { "type": "string", "maxLength": 128, "description": "Detail authorization order" },
+        "detailedAt": { "type": "string", "maxLength": 64, "description": "Authorization timestamp" },
+        "detailedBy": { "type": "string", "maxLength": 128, "description": "Authorizing user" },
+        "remarks": { "type": "string", "maxLength": 500, "description": "Profile remarks" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Last updated ISO timestamp" }
+      },
+      "required": ["id", "bdNo", "updatedAt"]
+    },
+    "AppSettingRecord": {
+      "title": "AppSettingRecord",
+      "description": "Configuration key-value entry including duty ratio matrix, custom duties, and disposal rules",
+      "type": "object",
+      "properties": {
+        "settingKey": { "type": "string", "maxLength": 200, "description": "Unique setting key" },
+        "value": { "type": "object", "description": "Native Map, Array, String, Number, or Boolean setting value" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "ISO timestamp" },
+        "updatedBy": { "type": "string", "maxLength": 128, "description": "Modifying BD No" }
+      },
+      "required": ["settingKey", "updatedAt"]
+    },
+    "CanteenMemberRecord": {
+      "title": "CanteenMemberRecord",
+      "description": "Canteen member profile, balance due, and display photo",
+      "type": "object",
+      "properties": {
+        "airman_id": { "type": "string", "maxLength": 128, "description": "Member airman ID" },
+        "bdNo": { "type": "string", "maxLength": 64, "description": "BD Number" },
+        "rank": { "type": "string", "maxLength": 64, "description": "Rank" },
+        "surname": { "type": "string", "maxLength": 200, "description": "Surname" },
+        "contact": { "type": "string", "maxLength": 64, "description": "Contact phone" },
+        "due": { "type": "number", "description": "Current due amount" },
+        "dp": { "type": "string", "maxLength": 500000, "description": "Profile photo URL or compact image" },
+        "role": { "type": "string", "maxLength": 64, "description": "Member role" },
+        "seniority": { "type": "number", "description": "Seniority order" },
+        "nameBn": { "type": "string", "maxLength": 200, "description": "Bangla name" },
+        "rankBn": { "type": "string", "maxLength": 100, "description": "Bangla rank" },
+        "active": { "type": "boolean", "description": "Active flag" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Last updated ISO timestamp" }
+      },
+      "required": ["airman_id", "bdNo", "updatedAt"]
+    },
+    "CanteenDataRecord": {
+      "title": "CanteenDataRecord",
+      "description": "Canteen module collection or configuration document",
+      "type": "object",
+      "properties": {
+        "docKey": { "type": "string", "maxLength": 128, "description": "Canteen key identifier" },
+        "value": { "type": "object", "description": "Native Map, Array, or primitive value" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "ISO timestamp" },
+        "updatedBy": { "type": "string", "maxLength": 128, "description": "Modifying BD No" }
+      },
+      "required": ["docKey", "updatedAt"]
+    },
+    "PresenceRecord": {
+      "title": "PresenceRecord",
+      "description": "Live user session presence for single vs multi-user backup frequency detection",
+      "type": "object",
+      "properties": {
+        "bdNo": { "type": "string", "maxLength": 64, "description": "Active user BD No" },
+        "sessionId": { "type": "string", "maxLength": 128, "description": "Unique browser/app session ID" },
+        "name": { "type": "string", "maxLength": 200, "description": "User name" },
+        "rank": { "type": "string", "maxLength": 64, "description": "User rank" },
+        "flightName": { "type": "string", "maxLength": 64, "description": "User flight" },
+        "role": { "type": "string", "maxLength": 32, "description": "User role" },
+        "status": { "type": "string", "maxLength": 32, "description": "online or offline" },
+        "page": { "type": "string", "maxLength": 128, "description": "Current active page" },
+        "deviceInfo": { "type": "string", "maxLength": 128, "description": "Device type" },
+        "lastActive": { "type": "string", "maxLength": 64, "description": "Last heartbeat ISO timestamp" }
+      },
+      "required": ["bdNo", "sessionId", "status", "lastActive"]
+    },
+    "SyncManifestRecord": {
+      "title": "SyncManifestRecord",
+      "description": "Lightweight global change manifest to trigger incremental cloud pulls without scanning collections",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "description": "Manifest document ID" },
+        "revision": { "type": "number", "description": "Monotonic update counter" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Last cloud mutation ISO timestamp" },
+        "updatedBySessionId": { "type": "string", "maxLength": 128, "description": "Client session ID that made the change" },
+        "updatedByBdNo": { "type": "string", "maxLength": 64, "description": "BD No of user who pushed the change" },
+        "lastReason": { "type": "string", "maxLength": 200, "description": "Reason for update" },
+        "changedCollections": { "type": "array", "description": "List of modified collection names" }
+      },
+      "required": ["id", "revision", "updatedAt"]
+    },
+    "TestConnectionRecord": {
+      "title": "TestConnectionRecord",
+      "description": "Health check probe document",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "maxLength": 64, "description": "Status marker" },
+        "updatedAt": { "type": "string", "maxLength": 64, "description": "Timestamp" }
+      },
+      "required": ["status"]
+    }
+  },
+  "firestore": {
+    "/airmen/{airmanId}": {
+      "schema": { "$ref": "#/entities/AirmanRecord" },
+      "description": "Airmen nominal roll and biodata documents"
+    },
+    "/duty_assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/DutyAssignmentRecord" },
+      "description": "Granular duty, leave, TDY, and deployment assignments"
+    },
+    "/parade_states/{logId}": {
+      "schema": { "$ref": "#/entities/ParadeStateLogRecord" },
+      "description": "Unit parade state and duty activity audit logs"
+    },
+    "/user_profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/UserProfileRecord" },
+      "description": "Authorized login profiles and roles"
+    },
+    "/app_settings/{settingKey}": {
+      "schema": { "$ref": "#/entities/AppSettingRecord" },
+      "description": "Duty ratio matrix, custom duties, and app settings"
+    },
+    "/canteen_members/{memberId}": {
+      "schema": { "$ref": "#/entities/CanteenMemberRecord" },
+      "description": "Canteen member records"
+    },
+    "/canteen_data/{docKey}": {
+      "schema": { "$ref": "#/entities/CanteenDataRecord" },
+      "description": "Canteen transactions, expenses, pre-orders, menu, and inventory keys"
+    },
+    "/presence/{bdNo}": {
+      "schema": { "$ref": "#/entities/PresenceRecord" },
+      "description": "Real-time active user presence documents"
+    },
+    "/system_meta/{metaId}": {
+      "schema": { "$ref": "#/entities/SyncManifestRecord" },
+      "description": "Global sync manifest for quota-efficient incremental updates"
+    },
+    "/test/{testId}": {
+      "schema": { "$ref": "#/entities/TestConnectionRecord" },
+      "description": "Firestore connectivity and quota health probe"
+    }
+  }
+}

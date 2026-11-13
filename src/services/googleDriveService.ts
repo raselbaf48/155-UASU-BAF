@@ -277,25 +277,74 @@ async function findBackupFile(accessToken: string): Promise<{ id: string; name: 
   return null;
 }
 
+const BACKUP_EXCLUDED_LOCAL_KEYS = new Set([
+  'baf_local_storage_snapshot',
+  'baf_drive_cloud_snapshot',
+  'baf_backup_restore_history_v1',
+  'baf_155_uasu_v2_db',
+  'baf_database_v2',
+  'canteen_members',
+  'canteen_members_cache',
+  'canteen_transactions',
+  'canteen_txs',
+]);
+
+function collectAllLocalSettings(): Record<string, string> {
+  const localSettings: Record<string, string> = {};
+  if (typeof window === 'undefined' || !window.localStorage) return localSettings;
+
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key || BACKUP_EXCLUDED_LOCAL_KEYS.has(key)) continue;
+      const val = window.localStorage.getItem(key);
+      if (val !== null && val !== undefined) {
+        localSettings[key] = val;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not collect localStorage settings:', err);
+  }
+  return localSettings;
+}
+
+function safeParseJson(raw: string | null | undefined): any {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
 /**
- * Export full application data bundle including BAF Duty Roster & Canteen
+ * Export full application data bundle including BAF Duty Roster, Duty Settings, Other Settings & Canteen
  */
 export async function exportFullSystemData() {
   const localDbData = localDb.getDb();
   let canteenMembers: any[] = [];
   let canteenTransactions: any[] = [];
   let canteenExpenses: any[] = [];
-  let appSettings: any[] = [];
+  let serverSettings: any[] = [];
+
+  const rawFetch: typeof fetch =
+    (typeof window !== 'undefined' && (window as any).__baf_raw_fetch) ||
+    (typeof window !== 'undefined' ? window.fetch.bind(window) : fetch);
 
   try {
-    const rawFetch = (window as any).__baf_raw_fetch || fetch;
-    const res = await rawFetch('/api/canteen/export-full-backup');
-    if (res.ok) {
-      const cData = await res.json();
-      canteenMembers = cData.members || [];
-      canteenTransactions = cData.transactions || [];
-      canteenExpenses = cData.expenses || [];
-      appSettings = cData.settings || [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await rawFetch('/api/canteen/export-full-backup', { signal: controller.signal });
+      if (res.ok) {
+        const cData = await res.json();
+        canteenMembers = cData.members || [];
+        canteenTransactions = cData.transactions || [];
+        canteenExpenses = cData.expenses || [];
+        serverSettings = cData.settings || [];
+      }
+    } finally {
+      clearTimeout(timer);
     }
   } catch (err) {
     console.warn('Failed to load canteen export for backup:', err);
@@ -308,16 +357,60 @@ export async function exportFullSystemData() {
     } catch {}
   }
 
+  const localSettings = collectAllLocalSettings();
+  const nowIso = new Date().toISOString();
+
+  // Merge server app_settings + live localStorage settings (skipping duplicate raw data caches)
+  const mergedSettingsMap = new Map<string, { setting_key: string; setting_value: string; updated_at: string }>();
+  if (Array.isArray(serverSettings)) {
+    for (const s of serverSettings) {
+      if (s && s.setting_key && s.setting_value !== undefined && !BACKUP_EXCLUDED_LOCAL_KEYS.has(s.setting_key)) {
+        mergedSettingsMap.set(s.setting_key, {
+          setting_key: s.setting_key,
+          setting_value: typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value),
+          updated_at: s.updated_at || nowIso,
+        });
+      }
+    }
+  }
+
+  for (const [k, v] of Object.entries(localSettings)) {
+    mergedSettingsMap.set(k, {
+      setting_key: k,
+      setting_value: v,
+      updated_at: nowIso,
+    });
+  }
+
+  const allMergedSettings = Array.from(mergedSettingsMap.values());
+
+  // Extract structured Duty Settings explicitly for clarity & guaranteed restore
+  const getSettingStr = (k: string) =>
+    localSettings[k] ?? mergedSettingsMap.get(k)?.setting_value;
+
+  const dutySettings = {
+    dutyMatrix: safeParseJson(getSettingStr('baf_official_duty_matrix_v4') || getSettingStr('baf_official_duty_matrix_v3')),
+    dutyRatioHistory: safeParseJson(getSettingStr('baf_duty_ratio_history_v1')),
+    customDuties: safeParseJson(getSettingStr('baf_custom_duties_v1')),
+    distributionManpower: safeParseJson(getSettingStr('baf_duty_distribution_manpower')),
+    distributionDisposals: safeParseJson(getSettingStr('baf_duty_distribution_disposals_master')),
+    distributionTotalDuty: safeParseJson(getSettingStr('baf_duty_distribution_total_duty')),
+    distributionCustomFlt: safeParseJson(getSettingStr('baf_duty_distribution_custom_flt')),
+  };
+
   return {
     version: '3.0',
     app: '155 UASU BAF Office Management & Duty Register System',
-    exportedAt: new Date().toISOString(),
+    exportedAt: nowIso,
     baf_unit_data: localDbData,
+    dutySettings,
+    localSettings,
+    app_settings: allMergedSettings,
     canteen: {
       members: canteenMembers,
       transactions: canteenTransactions,
       expenses: canteenExpenses,
-      settings: appSettings,
+      settings: allMergedSettings,
     },
     stats: {
       airmenCount: localDbData.airmen?.length || 0,
@@ -327,7 +420,7 @@ export async function exportFullSystemData() {
       ),
       canteenMembersCount: canteenMembers.length,
       canteenTransactionsCount: canteenTransactions.length,
-      settingsCount: appSettings.length,
+      settingsCount: allMergedSettings.length,
     },
   };
 }
@@ -505,24 +598,52 @@ export async function fetchBackupFromDrive(): Promise<{ metadata: any; content: 
 }
 
 /**
- * Restore data bundle into local state and server storage
+ * Restore data bundle into local state, Duty Settings, all other settings, and server storage
  */
-export async function restoreFromBackupData(backupData: any): Promise<{
+export async function restoreFromBackupData(
+  backupData: any,
+  onProgress?: (percent: number, stageLabel: string) => void
+): Promise<{
   success: boolean;
   message: string;
   restoredAirmen: number;
   restoredAssignments: number;
   restoredMembers: number;
+  restoredSettings: number;
 }> {
-  emitStatus('restoring', 'ডাটাবেস রিস্টোর করা হচ্ছে...', true);
+  emitStatus('restoring', 'Restoring database and settings...', true);
+  onProgress?.(8, 'Validating backup file and structure...');
+
+  const pauseStep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const postWithTimeout = async (url: string, payload: any, timeoutMs: number = 8000) => {
+    const rawFetch: typeof fetch =
+      (typeof window !== 'undefined' && (window as any).__baf_raw_fetch) ||
+      (typeof window !== 'undefined' ? window.fetch.bind(window) : fetch);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await rawFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      return res;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   try {
+    await pauseStep(150);
     const unitData = backupData.baf_unit_data || backupData;
     let restoredAirmen = 0;
     let restoredAssignments = 0;
     let restoredMembers = 0;
+    let restoredSettings = 0;
 
-    // 1. Restore localDb in browser
+    // 1. Restore localDb in browser (Airmen & Assignments & History)
+    onProgress?.(24, 'Restoring airmen biodata and duty roster...');
     if (unitData) {
       localDb.restoreDatabase(unitData);
       restoredAirmen = unitData.airmen?.length || 0;
@@ -531,50 +652,142 @@ export async function restoreFromBackupData(backupData: any): Promise<{
         0
       ));
     }
+    await pauseStep(180);
 
-    // 2. Push full bundle to server
-    try {
-      const rawFetch = (window as any).__baf_raw_fetch || fetch;
-      await rawFetch('/api/full-system-restore', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          baf_unit_data: unitData,
-          canteen: backupData.canteen || {
-            members: backupData.canteen_members || [],
-            transactions: backupData.canteen_transactions || [],
-            expenses: backupData.canteen_expenses || [],
-            settings: backupData.app_settings || [],
-          },
-        }),
-      });
+    // 2. Restore Duty Settings & ALL other settings into browser localStorage
+    onProgress?.(48, 'Restoring Duty Settings and app preferences...');
+    const appliedSettingsMap = new Map<string, string>();
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const rawSettingsSources = [
+        ...(Array.isArray(backupData.app_settings) ? backupData.app_settings : []),
+        ...(Array.isArray(backupData.canteen?.settings) ? backupData.canteen.settings : []),
+      ];
+
+      for (const s of rawSettingsSources) {
+        if (s && s.setting_key && s.setting_value !== undefined && !BACKUP_EXCLUDED_LOCAL_KEYS.has(s.setting_key)) {
+          const val = typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value);
+          try {
+            window.localStorage.setItem(s.setting_key, val);
+          } catch {}
+          appliedSettingsMap.set(s.setting_key, val);
+        }
+      }
+
+      if (backupData.localSettings && typeof backupData.localSettings === 'object' && !Array.isArray(backupData.localSettings)) {
+        for (const [key, val] of Object.entries(backupData.localSettings)) {
+          if (key && val !== undefined && val !== null && !BACKUP_EXCLUDED_LOCAL_KEYS.has(key)) {
+            const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+            try {
+              window.localStorage.setItem(key, strVal);
+            } catch {}
+            appliedSettingsMap.set(key, strVal);
+          }
+        }
+      }
+
+      if (backupData.dutySettings && typeof backupData.dutySettings === 'object') {
+        const ds = backupData.dutySettings;
+        const dutyKeyMap: Record<string, string> = {
+          dutyMatrix: 'baf_official_duty_matrix_v4',
+          dutyRatioHistory: 'baf_duty_ratio_history_v1',
+          customDuties: 'baf_custom_duties_v1',
+          distributionManpower: 'baf_duty_distribution_manpower',
+          distributionDisposals: 'baf_duty_distribution_disposals_master',
+          distributionTotalDuty: 'baf_duty_distribution_total_duty',
+          distributionCustomFlt: 'baf_duty_distribution_custom_flt',
+        };
+        for (const [field, storageKey] of Object.entries(dutyKeyMap)) {
+          if (ds[field] !== undefined && ds[field] !== null) {
+            const strVal = typeof ds[field] === 'string' ? ds[field] : JSON.stringify(ds[field]);
+            try {
+              window.localStorage.setItem(storageKey, strVal);
+            } catch {}
+            appliedSettingsMap.set(storageKey, strVal);
+          }
+        }
+      }
 
       if (backupData.canteen?.members?.length) {
         restoredMembers = backupData.canteen.members.length;
-        window.localStorage.setItem('canteen_members_cache', JSON.stringify(backupData.canteen.members));
+        try {
+          window.localStorage.setItem('canteen_members_cache', JSON.stringify(backupData.canteen.members));
+        } catch {}
+      } else if (backupData.canteen_members?.length) {
+        restoredMembers = backupData.canteen_members.length;
+        try {
+          window.localStorage.setItem('canteen_members_cache', JSON.stringify(backupData.canteen_members));
+        } catch {}
       }
-    } catch (err) {
-      console.warn('Server restore warning:', err);
+    }
+    restoredSettings = appliedSettingsMap.size;
+    await pauseStep(180);
+
+    // Build a compact, deduplicated settings object (avoids sending 10+ MB redundant payloads)
+    const compactLocalSettings: Record<string, string> = {};
+    appliedSettingsMap.forEach((v, k) => {
+      compactLocalSettings[k] = v;
+    });
+
+    // 3a. Sync Unit Database to Server (timeout-protected)
+    onProgress?.(66, 'Syncing unit roster database to server...');
+    if (unitData && (unitData.airmen || unitData.assignments)) {
+      try {
+        await postWithTimeout('/api/database/save', unitData, 8000);
+      } catch (err) {
+        console.warn('Server unit DB sync warning (non-fatal):', err);
+      }
     }
 
-    // 3. Dispatch update events to all open components
+    // 3b. Sync Canteen Records, Duty Settings & App Preferences to Server (timeout-protected)
+    onProgress?.(82, 'Syncing canteen records and settings to server...');
+    try {
+      await postWithTimeout(
+        '/api/full-system-restore',
+        {
+          localSettings: compactLocalSettings,
+          dutySettings: backupData.dutySettings,
+          canteen: {
+            members: backupData.canteen?.members || backupData.canteen_members || [],
+            transactions: backupData.canteen?.transactions || backupData.canteen_transactions || [],
+            expenses: backupData.canteen?.expenses || backupData.canteen_expenses || [],
+          },
+        },
+        8000
+      );
+    } catch (err) {
+      console.warn('Server settings/canteen sync warning (non-fatal):', err);
+    }
+    await pauseStep(160);
+
+    // 4. Dispatch update events to all open components
+    onProgress?.(93, 'Activating all modules and settings...');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('baf_state_updated', { detail: { source: 'drive_restore' } }));
+      window.dispatchEvent(new CustomEvent('baf_data_updated'));
+      window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated'));
+      window.dispatchEvent(new CustomEvent('baf_duty_ratio_history_updated'));
+      window.dispatchEvent(new CustomEvent('baf_custom_duties_updated'));
+      window.dispatchEvent(new CustomEvent('baf_settings_synced'));
+      window.dispatchEvent(new CustomEvent('baf_duty_distribution_updated'));
       window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: backupData.canteen?.members }));
       window.dispatchEvent(new CustomEvent('canteen_transactions_updated'));
+      window.dispatchEvent(new CustomEvent('canteen_settings_updated'));
     }
+    await pauseStep(180);
 
-    emitStatus('synced', 'সফলভাবে সমস্ত ডাটা রিস্টোর সম্পন্ন হয়েছে');
+    onProgress?.(100, 'Database and settings restore completed!');
+    emitStatus('synced', 'All database records and settings restored successfully.');
     return {
       success: true,
-      message: 'সম্পূর্ণ ডাটাবেস সফলভাবে রিস্টোর সম্পন্ন হয়েছে!',
+      message: 'All database records and settings restored successfully!',
       restoredAirmen,
       restoredAssignments,
       restoredMembers,
+      restoredSettings,
     };
   } catch (error: any) {
     console.error('Restore Error:', error);
-    emitStatus('error', error.message || 'রিস্টোর ব্যর্থ হয়েছে');
+    emitStatus('error', error.message || 'Restore failed');
     throw error;
   }
 }

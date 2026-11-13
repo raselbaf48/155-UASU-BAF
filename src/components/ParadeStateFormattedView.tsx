@@ -430,10 +430,18 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
       else fetchSingle(false);
     };
     window.addEventListener('baf_state_updated', handleGlobalUpdate);
+    window.addEventListener('baf_duty_ratio_updated', handleGlobalUpdate);
+    window.addEventListener('baf_custom_duties_updated', handleGlobalUpdate);
+    window.addEventListener('baf_duty_ratio_history_updated', handleGlobalUpdate);
+    window.addEventListener('baf_settings_synced', handleGlobalUpdate);
     return () => {
       window.removeEventListener('baf_state_updated', handleGlobalUpdate);
+      window.removeEventListener('baf_duty_ratio_updated', handleGlobalUpdate);
+      window.removeEventListener('baf_custom_duties_updated', handleGlobalUpdate);
+      window.removeEventListener('baf_duty_ratio_history_updated', handleGlobalUpdate);
+      window.removeEventListener('baf_settings_synced', handleGlobalUpdate);
     };
-  }, [fromDate, toDate, isPtDocument]);
+  }, [fromDate, toDate, isPtDocument, isOthersDocument]);
 
  // Quick Preset Handlers (Calculated relative to selected fromDate)
  const handleSetPreset = (type: 'today' | '7days' | '15days' | 'month') => {

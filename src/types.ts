@@ -280,6 +280,7 @@ export interface DetailedUserLogin {
   detailedBy: string;
   remarks?: string;
   lastLoginAt?: string;
+  updatedAt?: string;
 }
 
 

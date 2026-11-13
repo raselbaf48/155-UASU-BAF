@@ -146,7 +146,7 @@ export function formatDutyOnShortName(
     notesLower.includes('escort') ||
     nameLower.includes('escort')
   ) {
-    return 'ESCT';
+    return 'Esct Duty';
   }
 
   // 7. Orderly Room & UWO
@@ -222,26 +222,29 @@ export function formatDutyOnShortName(
 
   if (isRawCode(code) || isRawCode(dutyName)) {
     const rawTarget = isRawCode(code) ? code : (dutyName || '');
-    if (rawTarget.includes('1794394')) return 'Escort Duty';
+    if (rawTarget.includes('1794394')) return 'Esct Duty';
     const resolvedName = getCustomDutyName(rawTarget) ||
       DUTY_TYPE_MAP.get(rawTarget as any)?.name ||
       getCustomDuties().find(d => d.code === rawTarget)?.name;
     if (resolvedName && !isRawCode(resolvedName)) {
+      if (resolvedName.toLowerCase().includes('escort')) return 'Esct Duty';
       return resolvedName;
     }
   }
 
   // 13. Custom fallback: clean any internal "imported" tag and avoid returning generic "DUTY" or raw codes
   if (dutyName && !isRawCode(dutyName) && !dutyName.toLowerCase().includes('imported') && !isGenericDuty(dutyName)) {
+    if (dutyName.toLowerCase().includes('escort')) return 'Esct Duty';
     return dutyName;
   }
   if (notesStr && !isRawCode(notesStr) && !notesLower.includes('imported') && !isGenericDuty(notesStr)) {
+    if (notesLower.includes('escort')) return 'Esct Duty';
     return notesStr;
   }
 
   // 14. If the code was a raw custom code and wasn't resolved yet
   if (isRawCode(code)) {
-    return code.includes('1794394') ? 'Escort Duty' : 'Special Duty';
+    return code.includes('1794394') ? 'Esct Duty' : 'Special Duty';
   }
 
   // 15. Any remaining generic duty code falls back to Sy Duty (Security Duty in 155 UASU BAF)
@@ -262,13 +265,23 @@ export function formatDutyOffShortName(
     code === 'ESC' ||
     code === 'ESCT' ||
     name.includes('escort') ||
-    n.includes('escort')
+    name.includes('esct') ||
+    n.includes('escort') ||
+    n.includes('esct')
   ) {
-    return 'Escort Off';
+    return 'Esct Off';
   }
   const shortOn = formatDutyOnShortName(previousDutyCode, undefined, notes, previousDutyName);
   if (shortOn.toLowerCase().endsWith('off')) return shortOn;
-  if (shortOn === 'ESC' || shortOn === 'ESCT' || shortOn.toLowerCase() === 'escort') return 'Escort Off';
+  if (
+    shortOn === 'ESC' ||
+    shortOn === 'ESCT' ||
+    shortOn === 'Esct Duty' ||
+    shortOn === 'Escort Duty' ||
+    shortOn.toLowerCase() === 'escort'
+  ) {
+    return 'Esct Off';
+  }
   if (shortOn === 'Sy Duty') return 'Sy Off';
   return `${shortOn} Off`;
 }
