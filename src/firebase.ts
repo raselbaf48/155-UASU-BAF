@@ -226,7 +226,7 @@ export function handleFirestoreError(
 }
 
 export async function testConnection(): Promise<boolean> {
-  if (!isFirebaseConfigured || !dbInstance) return false;
+  if (!isFirebaseConfigured || !dbInstance || isFirestoreQuotaExceeded()) return false;
   try {
     await getDocFromServer(doc(dbInstance, 'test', 'connection'));
     if (isFirestoreQuotaExceeded()) {

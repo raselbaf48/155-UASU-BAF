@@ -42,6 +42,7 @@ import {
   executeFullMigrationToFirebase,
   publishSyncManifest,
   subscribeToSyncManifest,
+  fetchSyncManifestFromFirebase,
   probeFirebaseConnectionAndQuota,
   getAssignmentDocId,
   getAirmanDocId,
@@ -253,6 +254,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const SINGLE_USER_BACKUP_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const MULTI_USER_BACKUP_INTERVAL_MS = 10 * 1000; // 10 seconds
 const LAST_FIREBASE_PULL_KEY = 'baf_last_firebase_pull_at';
+const LAST_HANDLED_REVISION_KEY = 'baf_last_handled_sync_revision';
 const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
 const IGNORED_SETTING_KEYS = new Set<string>([
   'baf_155_uasu_v2_db',
@@ -272,18 +274,34 @@ const IGNORED_SETTING_KEYS = new Set<string>([
   'baf_canteen_last_used_id',
   'baf_office_last_used_id',
   'baf_last_used_login_portal',
+  'baf_last_used_canteen_id',
   'baf_dismissed_notice_sig',
   'baf_cleared_notices_v4',
+  'baf_cleared_auto_flight_targets_v4',
+  'baf_duty_distribution_target_date',
   'baf_firebase_quota_exceeded_at',
   'baf_firebase_quota_error_msg',
   'baf_cloud_connected',
   'baf_cloud_last_sync',
   'baf_last_firebase_pull_at',
+  'baf_last_handled_sync_revision',
+  'canteen_last_handled_sync_revision',
   'baf_local_storage_snapshot',
   'baf_local_snapshot_time',
   'baf_drive_cloud_snapshot',
+  'baf_drive_connected',
+  'baf_drive_user_email',
+  'baf_drive_user_name',
+  'baf_drive_last_backup',
+  'baf_matrix_last_modified',
+  'baf_latest_app_version',
   'baf_backup_restore_history_v1',
   'baf_client_session_id',
+  'baf_detailed_user_logins',
+  'baf_canteen_settings_v1',
+  'baf_others_fund_categories',
+  'baf_others_fund_categories_customized',
+  'baf_deleted_others_fund_categories',
 ]);
 
 function isSyncableSettingKey(key: string): boolean {
@@ -294,6 +312,7 @@ function isSyncableSettingKey(key: string): boolean {
 export class LocalDatabaseEngine {
   public db: LocalStorageDB;
   private isFirebaseSyncing: boolean = false;
+  private activeSyncPromise: Promise<boolean> | null = null;
   public isInitialPullDone: boolean = false;
   private isPushing: boolean = false;
   private saveTimeout: any = null;
@@ -309,9 +328,11 @@ export class LocalDatabaseEngine {
 
   constructor() {
     this.db = this.loadInitialLocalState();
-    this.lastSyncedDbStr = JSON.stringify(this.db);
+    this.lastSyncedDbStr = this.stripTimestampForCompare(this.db);
     if (typeof window !== 'undefined') {
       this.lastPullAt = window.localStorage.getItem(LAST_FIREBASE_PULL_KEY) || '';
+      this.lastHandledRevision = Number(window.localStorage.getItem(LAST_HANDLED_REVISION_KEY) || '0') || 0;
+      this.seedBaselineSettingsMap();
       window.localStorage.removeItem('baf_pending_sync');
       this.pullDatabaseFromServer();
       this.pullAllSettingsFromServer();
@@ -415,13 +436,40 @@ export class LocalDatabaseEngine {
     }
   }
 
+  private seedBaselineSettingsMap() {
+    if (typeof window === 'undefined') return;
+    const pendingSettings = getPendingDeltaQueue().settings || {};
+    const snap = this.getSyncableSettingsSnapshot();
+    Object.entries(snap).forEach(([k, v]) => {
+      if (!pendingSettings[k] && !lastSyncedSettingsMap.has(k)) {
+        lastSyncedSettingsMap.set(k, v);
+      }
+    });
+  }
+
+  private recordHandledRevision(revision?: number) {
+    if (!revision || revision <= this.lastHandledRevision) return;
+    this.lastHandledRevision = revision;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(LAST_HANDLED_REVISION_KEY, String(revision));
+      } catch {}
+    }
+  }
+
   private attachManifestListener() {
     if (!isFirebaseConfigured || isFirestoreQuotaExceeded() || this.manifestUnsub) return;
     this.manifestUnsub = subscribeToSyncManifest((manifest) => {
       if (!manifest || !manifest.updatedAt) return;
       if (manifest.updatedBySessionId === CLIENT_SESSION_ID) return;
       if (manifest.revision && manifest.revision <= this.lastHandledRevision) return;
-      this.lastHandledRevision = manifest.revision || Date.now();
+      const manifestMs = this.parseTimeMs(manifest.updatedAt);
+      const lastPullMs = this.parseTimeMs(this.lastPullAt);
+      if (manifestMs > 0 && lastPullMs > 0 && manifestMs <= lastPullMs) {
+        this.recordHandledRevision(manifest.revision);
+        return;
+      }
+      this.recordHandledRevision(manifest.revision || Date.now());
       // Only pull changed collections incrementally
       this.pullIncrementalFromFirebase(manifest.changedCollections);
     });
@@ -441,9 +489,18 @@ export class LocalDatabaseEngine {
     return out;
   }
 
+  private stripTimestampForCompare(dbObj: LocalStorageDB): string {
+    try {
+      const { lastUpdated: _ignored, ...rest } = dbObj as any;
+      return JSON.stringify(rest);
+    } catch {
+      return JSON.stringify(dbObj);
+    }
+  }
+
   private hasUnsyncedDifferences(dbToCheck: LocalStorageDB = this.db): boolean {
     if (hasPendingDeltas()) return true;
-    const curDbStr = JSON.stringify(dbToCheck);
+    const curDbStr = this.stripTimestampForCompare(dbToCheck);
     if (this.lastSyncedDbStr && this.lastSyncedDbStr !== curDbStr) return true;
     if (typeof window !== 'undefined') {
       const snap = this.getSyncableSettingsSnapshot();
@@ -519,19 +576,25 @@ export class LocalDatabaseEngine {
         this.db.airmen = normalizeAirmenSeniority(mergedAirmen);
       }
 
-      // 2. Duty Assignments: authoritative sync from server
-      if (srvDb.assignments && typeof srvDb.assignments === 'object') {
+      // 2. Duty Assignments: only pull from local server if Firebase hasn't already completed initial pull or quota is full
+      if (srvDb.assignments && typeof srvDb.assignments === 'object' && (!this.isInitialPullDone || isFirestoreQuotaExceeded())) {
         if (!this.db.assignments) this.db.assignments = {};
         Object.keys(srvDb.assignments).forEach((mKey) => {
-          this.db.assignments[mKey] = srvDb.assignments[mKey] || [];
-          changed = true;
+          const incoming = srvDb.assignments[mKey] || [];
+          if (JSON.stringify(this.db.assignments[mKey] || []) !== JSON.stringify(incoming)) {
+            this.db.assignments[mKey] = incoming;
+            changed = true;
+          }
         });
       }
 
       // 3. Activity History
-      if (Array.isArray(srvDb.activityHistory) && srvDb.activityHistory.length > 0) {
+      if (Array.isArray(srvDb.activityHistory) && srvDb.activityHistory.length > 0 && (!this.isInitialPullDone || isFirestoreQuotaExceeded())) {
+        const beforeLen = (this.db.activityHistory || []).length;
         this.mergeHistory(srvDb.activityHistory);
-        changed = true;
+        if ((this.db.activityHistory || []).length !== beforeLen) {
+          changed = true;
+        }
       }
 
       // 4. Admin Passcode
@@ -544,7 +607,7 @@ export class LocalDatabaseEngine {
         this.db.lastUpdated = new Date().toISOString();
         this.saveToStorage(this.db, true, false, false);
         if (!this.isInitialPullDone && !hasPendingDeltas()) {
-          this.lastSyncedDbStr = JSON.stringify(this.db);
+          this.lastSyncedDbStr = this.stripTimestampForCompare(this.db);
         }
         window.dispatchEvent(new CustomEvent('baf_data_updated'));
         window.dispatchEvent(new CustomEvent('baf_duty_distribution_updated'));
@@ -727,7 +790,7 @@ export class LocalDatabaseEngine {
   /**
    * Synchronize database with Firebase Firestore (Full pull + Pending Delta Reconciliation)
    */
-  public async syncFromFirebase(options?: { isLoginSync?: boolean; isQuotaRecovery?: boolean }): Promise<boolean> {
+  public async syncFromFirebase(options?: { isLoginSync?: boolean; isQuotaRecovery?: boolean; forceFullPull?: boolean }): Promise<boolean> {
     if (typeof window === 'undefined') return false;
 
     if (!isFirebaseConfigured) {
@@ -737,14 +800,41 @@ export class LocalDatabaseEngine {
       return true;
     }
 
+    if (this.activeSyncPromise) {
+      return this.activeSyncPromise;
+    }
     if (this.isFirebaseSyncing) return false;
 
-    this.isFirebaseSyncing = true;
-    isSyncingActive = true;
-    broadcastSyncState();
-    addSyncLog({ timestamp: new Date().toISOString(), type: 'PULL', status: 'SUCCESS', message: 'Fetching latest data from Firebase Firestore...' });
+    this.activeSyncPromise = (async () => {
+      this.isFirebaseSyncing = true;
+      isSyncingActive = true;
+      broadcastSyncState();
 
-    try {
+      // Watchdog timer ensures Syncing badge can never hang indefinitely
+      const watchdogTimer = setTimeout(() => {
+        if (this.isFirebaseSyncing || isSyncingActive) {
+          this.isFirebaseSyncing = false;
+          isSyncingActive = false;
+          this.isInitialPullDone = true;
+          this.activeSyncPromise = null;
+          broadcastSyncState();
+        }
+      }, 45000);
+
+      try {
+      // Skip duplicate login sync if boot sync already completed cleanly within 20 seconds
+      if (
+        options?.isLoginSync &&
+        !options?.forceFullPull &&
+        !options?.isQuotaRecovery &&
+        !isFirestoreQuotaExceeded() &&
+        this.isInitialPullDone &&
+        this.lastPullAt &&
+        Date.now() - this.parseTimeMs(this.lastPullAt) < 20000
+      ) {
+        return true;
+      }
+
       // On login or manual sync, verify Firebase health & quota live from server
       if (options?.isLoginSync || options?.isQuotaRecovery || isFirestoreQuotaExceeded()) {
         const probe = await probeFirebaseConnectionAndQuota(Boolean(options?.isLoginSync || options?.isQuotaRecovery));
@@ -776,20 +866,57 @@ export class LocalDatabaseEngine {
         }
       }
 
-      emitSyncProgress(15, 'Connecting to Firebase Firestore...');
+      emitSyncProgress(15, 'Checking Firebase sync manifest...');
+
+      const hasLocalAssignments = Object.values(this.db.assignments || {}).some(
+        (list) => Array.isArray(list) && list.length > 0
+      );
+      const canUseIncremental =
+        !options?.forceFullPull &&
+        Boolean(this.lastPullAt) &&
+        (this.db.airmen || []).length > 0 &&
+        hasLocalAssignments;
+
+      const manifest = canUseIncremental ? await fetchSyncManifestFromFirebase() : null;
+      const manifestMs = manifest?.updatedAt ? this.parseTimeMs(manifest.updatedAt) : 0;
+      const lastPullMs = this.lastPullAt ? this.parseTimeMs(this.lastPullAt) : 0;
+
+      // Ultra-fast path: manifest timestamp <= lastPullAt and no local pending deltas
+      if (canUseIncremental && manifest && manifestMs > 0 && manifestMs <= lastPullMs && !hasPendingDeltas()) {
+        this.recordHandledRevision(manifest.revision);
+        this.lastSyncedDbStr = this.stripTimestampForCompare(this.db);
+        this.seedBaselineSettingsMap();
+        const nowIso = new Date().toISOString();
+        firebaseConnected = true;
+        firebaseLastSyncTime = nowIso;
+        window.localStorage.setItem('baf_cloud_connected', 'true');
+        window.localStorage.setItem('baf_cloud_last_sync', nowIso);
+        this.isInitialPullDone = true;
+        emitSyncProgress(100, 'Already up to date with Firebase!');
+        addSyncLog({
+          timestamp: nowIso,
+          type: 'PULL',
+          status: 'SUCCESS',
+          message: `Synced with Firebase Firestore (${this.db.airmen.length} airmen — already up to date).`,
+        });
+        return true;
+      }
+
+      const useSinceIso = canUseIncremental && manifest ? this.lastPullAt : undefined;
+      emitSyncProgress(30, useSinceIso ? 'Fetching recent changes from Firebase...' : 'Fetching database from Firebase Firestore...');
 
       const [fbAirmen, fbAssignments, fbHistory, fbUsers, fbSettingsMeta] = await Promise.all([
-        fetchAirmenFromFirebase(),
-        fetchDutyAssignmentsFromFirebase(),
-        fetchParadeStatesFromFirebase(),
-        fetchUserProfilesFromFirebase(),
-        fetchAppSettingsWithMetaFromFirebase(),
+        fetchAirmenFromFirebase(useSinceIso),
+        fetchDutyAssignmentsFromFirebase(useSinceIso),
+        fetchParadeStatesFromFirebase(useSinceIso),
+        fetchUserProfilesFromFirebase(useSinceIso),
+        fetchAppSettingsWithMetaFromFirebase(useSinceIso),
       ]);
 
-      emitSyncProgress(55, 'Reconciling cloud & local records...');
+      emitSyncProgress(60, 'Reconciling cloud & local records...');
 
-      // First-time seed: Firebase is empty while local DB already has data
-      if (fbAirmen.length === 0 && fbAssignments.length === 0 && this.db.airmen.length > 0) {
+      // First-time seed: Firebase is completely empty (full fetch mode) while local DB already has data
+      if (!useSinceIso && fbAirmen.length === 0 && fbAssignments.length === 0 && this.db.airmen.length > 0) {
         emitSyncProgress(70, 'Seeding initial database to Firebase...');
         await this.pushAllToFirebaseInternal(this.db, 'initial_seed');
         const qSnap = getPendingDeltaQueue();
@@ -804,7 +931,7 @@ export class LocalDatabaseEngine {
         const nowIso = new Date().toISOString();
         this.lastPullAt = nowIso;
         window.localStorage.setItem(LAST_FIREBASE_PULL_KEY, nowIso);
-        this.lastSyncedDbStr = JSON.stringify(this.db);
+        this.lastSyncedDbStr = this.stripTimestampForCompare(this.db);
         firebaseConnected = true;
         firebaseLastSyncTime = nowIso;
         window.localStorage.setItem('baf_cloud_connected', 'true');
@@ -844,6 +971,14 @@ export class LocalDatabaseEngine {
         return cleanBd || String(a?.id || '');
       };
 
+      // In incremental mode, seed map from local airmen first
+      if (useSinceIso) {
+        (this.db.airmen || []).forEach((a: any) => {
+          const k = getCanonicalAirKey(a);
+          if (k) airmenMap.set(k, a);
+        });
+      }
+
       fbAirmen.forEach((a: any) => {
         const k = getCanonicalAirKey(a);
         if (k) airmenMap.set(k, a);
@@ -871,8 +1006,23 @@ export class LocalDatabaseEngine {
         newDb.airmen = normalizeAirmenSeniority(Array.from(airmenMap.values()));
       }
 
-      // 2. Reconcile Duty Assignments (Per-Doc Timestamp + Non-overlapping Flight Combination)
+      // 2. Reconcile Duty Assignments (Incremental-aware + Skip identical redundant pushes)
       const mergedAsnMap = new Map<string, { item: any; isDeleted: boolean; updatedAtMs: number }>();
+
+      // In incremental mode, preserve existing local assignments before overlaying changed cloud docs
+      if (useSinceIso) {
+        Object.values(this.db.assignments || {}).forEach((monthList) => {
+          (monthList || []).forEach((a) => {
+            const docId = getAssignmentDocId(a);
+            mergedAsnMap.set(docId, {
+              item: a,
+              isDeleted: false,
+              updatedAtMs: this.parseTimeMs((a as any).updatedAt || this.lastPullAt),
+            });
+          });
+        });
+      }
+
       fbAssignments.forEach((a: any) => {
         const docId = getAssignmentDocId(a);
         mergedAsnMap.set(docId, {
@@ -882,11 +1032,29 @@ export class LocalDatabaseEngine {
         });
       });
 
-      // Overlay any local assignments that aren't in cloud ONLY if cloud was completely empty or local has pending delta
+      // Overlay any local assignments that have genuine pending deltas
       Object.values(pendingQueue.assignments || {}).forEach((delta) => {
         if (!delta || !delta.docId) return;
         const lMs = this.parseTimeMs(delta.updatedAt);
         const cloudEntry = mergedAsnMap.get(delta.docId);
+
+        // If identical doc is already present in cloud/local merged map, clear without redundant upload
+        const isSameAsCloud =
+          cloudEntry &&
+          Boolean(cloudEntry.isDeleted) === Boolean(delta.isDeleted) &&
+          cloudEntry.item?.airmanId === delta.assignment?.airmanId &&
+          cloudEntry.item?.date === delta.assignment?.date &&
+          cloudEntry.item?.dutyCode === delta.assignment?.dutyCode &&
+          (cloudEntry.item?.idaShift || '') === (delta.assignment?.idaShift || '') &&
+          (cloudEntry.item?.disposalScope || 'ALL') === (delta.assignment?.disposalScope || 'ALL') &&
+          (cloudEntry.item?.notes || '') === (delta.assignment?.notes || '') &&
+          (cloudEntry.item?.location || '') === (delta.assignment?.location || '');
+
+        if (isSameAsCloud && (!cloudEntry || cloudEntry.updatedAtMs >= lMs || Object.keys(pendingQueue.assignments).length > 200)) {
+          pushedAssignmentDocIds.push(delta.docId);
+          return;
+        }
+
         if (!cloudEntry || lMs >= cloudEntry.updatedAtMs) {
           mergedAsnMap.set(delta.docId, {
             item: delta.assignment,
@@ -914,7 +1082,7 @@ export class LocalDatabaseEngine {
           assignmentsByMonth[ym].push(a);
         }
       });
-      if (fbAssignments.length > 0 || Object.keys(pendingQueue.assignments).length > 0) {
+      if (useSinceIso || fbAssignments.length > 0 || Object.keys(pendingQueue.assignments).length > 0) {
         newDb.assignments = assignmentsByMonth;
       }
 
@@ -947,6 +1115,12 @@ export class LocalDatabaseEngine {
       // 4. Reconcile User Profiles
       const userMap = new Map<string, any>();
       const getUserBdKey = (u: any) => String(u?.bdNo || u?.id || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+      if (useSinceIso) {
+        (this.db.detailedUsers || []).forEach((u: any) => {
+          const k = getUserBdKey(u);
+          if (k) userMap.set(k, u);
+        });
+      }
       fbUsers.forEach((u: any) => {
         const k = getUserBdKey(u);
         if (k) userMap.set(k, u);
@@ -1074,7 +1248,9 @@ export class LocalDatabaseEngine {
       this.db = newDb;
       this.saveToStorage(newDb, false, false, false);
       window.localStorage.removeItem('baf_pending_sync');
-      this.lastSyncedDbStr = JSON.stringify(newDb);
+      this.recordHandledRevision(manifest?.revision);
+      this.lastSyncedDbStr = this.stripTimestampForCompare(newDb);
+      this.seedBaselineSettingsMap();
       const nowIso = new Date().toISOString();
       this.lastPullAt = nowIso;
       window.localStorage.setItem(LAST_FIREBASE_PULL_KEY, nowIso);
@@ -1125,12 +1301,17 @@ export class LocalDatabaseEngine {
         message: quotaHit ? 'Firebase Quota Exceeded — using Local Cloud Storage.' : `Firebase pull error: ${msg}`,
       });
       return quotaHit;
-    } finally {
-      this.isFirebaseSyncing = false;
-      isSyncingActive = false;
-      this.isInitialPullDone = true;
-      broadcastSyncState();
-    }
+      } finally {
+        clearTimeout(watchdogTimer);
+        this.isFirebaseSyncing = false;
+        isSyncingActive = false;
+        this.isInitialPullDone = true;
+        this.activeSyncPromise = null;
+        broadcastSyncState();
+      }
+    })();
+
+    return this.activeSyncPromise;
   }
 
   /**
@@ -1264,7 +1445,7 @@ export class LocalDatabaseEngine {
         newDb.lastUpdated = nowIso;
         this.db = newDb;
         this.saveToStorage(newDb, false, false, false);
-        this.lastSyncedDbStr = JSON.stringify(newDb);
+        this.lastSyncedDbStr = this.stripTimestampForCompare(newDb);
         window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
         window.dispatchEvent(new CustomEvent('baf_state_updated', { detail: { source: 'firebase' } }));
         window.dispatchEvent(new CustomEvent('baf_duty_distribution_updated', { detail: { source: 'firebase' } }));
@@ -1285,6 +1466,7 @@ export class LocalDatabaseEngine {
   public async syncSettingToCloud(key: string, value: string): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     if (!isSyncableSettingKey(key) && key !== 'baf_user_login_history') return false;
+    if (lastSyncedSettingsMap.get(key) === value) return true;
     const nowIso = new Date().toISOString();
     recordPendingDeltas({ settingKeys: [key] });
 
@@ -1378,7 +1560,19 @@ export class LocalDatabaseEngine {
       });
       currAsnMap.forEach((currA, docId) => {
         const prevA = prevAsnMap.get(docId);
-        if (!prevA || JSON.stringify(prevA) !== JSON.stringify(currA)) {
+        if (
+          !prevA ||
+          prevA.airmanId !== currA.airmanId ||
+          prevA.date !== currA.date ||
+          prevA.dutyCode !== currA.dutyCode ||
+          (prevA.idaShift || '') !== (currA.idaShift || '') ||
+          (prevA.proxyForFlight || '') !== (currA.proxyForFlight || '') ||
+          (prevA.disposalScope || 'ALL') !== (currA.disposalScope || 'ALL') ||
+          (prevA.notes || '') !== (currA.notes || '') ||
+          (prevA.location || '') !== (currA.location || '') ||
+          Boolean(prevA.isOfficial) !== Boolean(currA.isOfficial) ||
+          Boolean(prevA.isCompleted) !== Boolean(currA.isCompleted)
+        ) {
           changedAssignments.push(currA);
         }
       });
@@ -1587,7 +1781,7 @@ export class LocalDatabaseEngine {
           settingKeys: Array.from(settingsToPushMap.keys()),
         });
 
-        this.lastSyncedDbStr = JSON.stringify(this.db);
+        this.lastSyncedDbStr = this.stripTimestampForCompare(this.db);
         const curMatrix = window.localStorage.getItem('baf_official_duty_matrix_v4');
         if (curMatrix) lastSyncedMatrixRaw = curMatrix;
 

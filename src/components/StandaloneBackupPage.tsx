@@ -452,12 +452,12 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
   return (
     <div className="fixed inset-0 z-50 bg-[#0c0e14] text-slate-100 flex flex-col w-screen h-screen overflow-hidden">
       {/* Full-Width Top Header */}
-      <header className="shrink-0 bg-[#141721]/95 backdrop-blur-md border-b border-slate-800/80 px-5 sm:px-10 py-3.5 flex items-center justify-between shadow-lg">
-        <div className="flex items-center gap-3">
+      <header className="shrink-0 bg-[#141721]/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-10 py-2.5 sm:py-3.5 flex items-center justify-between gap-2 shadow-lg">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 text-xs font-bold transition-all cursor-pointer shadow-xs"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Back</span>
@@ -465,13 +465,13 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
 
           <div className="hidden sm:block h-5 w-px bg-slate-800" />
 
-          <div className="flex items-center gap-2.5">
-            <Logo155UASU className="w-8 h-8 shrink-0" />
-            <div>
-              <div className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <Logo155UASU className="w-7 h-7 sm:w-8 sm:h-8 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[9px] sm:text-[10px] font-bold tracking-widest text-emerald-400 uppercase truncate">
                 155 UASU BAF • BASE ZHR
               </div>
-              <h1 className="text-sm sm:text-base font-black text-white tracking-tight leading-none">
+              <h1 className="text-xs sm:text-base font-black text-white tracking-tight leading-tight truncate">
                 Database Cloud Sync & Backup
               </h1>
             </div>
@@ -479,39 +479,39 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
         </div>
 
         {/* Clean Live Status Pill */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {quotaExceeded ? (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40">
-              <span className="w-2 h-2 rounded-full bg-amber-400" />
-              Quota Full • Local Cloud
+            <span className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+              <span>Quota Full • Local Cloud</span>
             </span>
           ) : cloudState.status === 'syncing' || cloudActionStatus !== '' ? (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/40">
-              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-              Syncing...
+            <span className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/40 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping shrink-0" />
+              <span>Syncing...</span>
             </span>
           ) : !isOnline || !isFirebaseConfigured ? (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
-              <span className="w-2 h-2 rounded-full bg-rose-400" />
-              Local Offline Mode
+            <span className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
+              <span>Local Offline Mode</span>
             </span>
           ) : pendingCount > 0 ? (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-sky-500/15 text-sky-300 border border-sky-500/40">
-              <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-              {pendingCount} Pending
+            <span className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-sky-500/15 text-sky-300 border border-sky-500/40 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse shrink-0" />
+              <span>{pendingCount} Pending</span>
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              Cloud Synced
+            <span className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+              <span>Cloud Synced</span>
             </span>
           )}
         </div>
       </header>
 
-      {/* Full-Screen Laptop Body */}
-      <main className="flex-1 w-full flex flex-col px-5 sm:px-10 lg:px-16 py-5 sm:py-7 overflow-y-auto">
-        <div className="w-full max-w-6xl mx-auto flex-1 flex flex-col gap-5">
+      {/* Full-Screen Body */}
+      <main className="flex-1 w-full flex flex-col px-3 sm:px-10 lg:px-16 py-3 sm:py-7 overflow-y-auto">
+        <div className="w-full max-w-6xl mx-auto flex-1 flex flex-col gap-3.5 sm:gap-5">
           {/* Alerts */}
           {errorMessage && (
             <div className="shrink-0 flex items-center justify-between p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs sm:text-sm font-semibold animate-in fade-in">
@@ -546,7 +546,7 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
           )}
 
           {/* 2-Option Mode Switcher: Local Cloud | Firebase Cloud */}
-          <div className="shrink-0 w-full max-w-xl mx-auto bg-[#141927] border border-slate-800 rounded-2xl p-1.5 grid grid-cols-2 gap-2 shadow-lg">
+          <div className="shrink-0 w-full max-w-xl mx-auto bg-[#141927] border border-slate-800 rounded-2xl p-1 sm:p-1.5 grid grid-cols-2 gap-1.5 sm:gap-2 shadow-lg">
             <button
               type="button"
               onClick={() => {
@@ -554,13 +554,13 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                 setErrorMessage('');
                 setSuccessMessage('');
               }}
-              className={`flex items-center justify-center gap-2 py-3 px-5 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 px-3 sm:px-5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
                 activeCloudTab === 'LOCAL'
                   ? 'bg-[#1e293b] text-emerald-400 border border-emerald-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 border border-transparent'
               }`}
             >
-              <HardDrive className="w-4 h-4" />
+              <HardDrive className="w-4 h-4 shrink-0" />
               <span>Local Cloud</span>
             </button>
 
@@ -571,38 +571,38 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                 setErrorMessage('');
                 setSuccessMessage('');
               }}
-              className={`flex items-center justify-center gap-2 py-3 px-5 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 px-3 sm:px-5 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
                 activeCloudTab === 'FIREBASE'
                   ? 'bg-[#1e293b] text-blue-400 border border-blue-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 border border-transparent'
               }`}
             >
-              <Cloud className="w-4 h-4" />
+              <Cloud className="w-4 h-4 shrink-0" />
               <span>Firebase Cloud</span>
             </button>
           </div>
 
           {/* Full-Screen Main Interface Card (Same Clean Layout in Both Tabs) */}
-          <section className="flex-1 w-full bg-[#131826] border border-slate-800/80 rounded-3xl p-6 sm:p-8 lg:p-10 shadow-2xl flex flex-col justify-between">
+          <section className="flex-1 w-full bg-[#131826] border border-slate-800/80 rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 shadow-2xl flex flex-col justify-between">
             {/* Upper Centered Action Area */}
             <div className="flex flex-col items-center justify-center text-center max-w-2xl w-full mx-auto">
               <div
-                className={`w-16 h-16 rounded-full flex items-center justify-center mb-5 ${
+                className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-3 sm:mb-5 ${
                   activeCloudTab === 'LOCAL' ? 'bg-emerald-500/15' : 'bg-[#1e2b4d]'
                 }`}
               >
                 {activeCloudTab === 'LOCAL' ? (
-                  <HardDrive className="w-8 h-8 text-emerald-400" />
+                  <HardDrive className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-400" />
                 ) : (
-                  <Cloud className="w-8 h-8 text-blue-400" />
+                  <Cloud className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400" />
                 )}
               </div>
 
-              <h2 className="text-2xl font-bold text-white mb-2">
+              <h2 className="text-lg sm:text-2xl font-bold text-white mb-1.5 sm:mb-2">
                 {activeCloudTab === 'LOCAL' ? 'Local Cloud Backup & Restore' : 'Firebase Cloud Sync'}
               </h2>
 
-              <p className="text-sm text-slate-400 mb-7 max-w-lg leading-relaxed">
+              <p className="text-xs sm:text-sm text-slate-400 mb-5 sm:mb-7 max-w-lg leading-relaxed">
                 {activeCloudTab === 'LOCAL'
                   ? 'সম্পূর্ণ ডাটাবেজ ও সেটিংস অফলাইন ফাইল (.json) হিসেবে ব্যাকআপ নিন অথবা আগের ব্যাকআপ ফাইল সিলেক্ট করে রিস্টোর করুন।'
                   : 'লোকাল ডাটাবেজ পরিবর্তনসমূহ Firebase Cloud-এ সংরক্ষণ করুন বা ক্লাউড থেকে সর্বশেষ ডাটা রিলোড করুন।'}
@@ -628,9 +628,9 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                   </div>
                 )}
 
-              {/* Action Buttons: Backup / Restore for Local Cloud | Push to Cloud / Pull from Cloud for Firebase Cloud */}
+              {/* Action Buttons: Side-by-side on both Mobile & Desktop */}
               {activeCloudTab === 'LOCAL' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-4 w-full max-w-lg">
                   <button
                     type="button"
                     onClick={handleLocalOfflineBackup}
@@ -638,13 +638,13 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                     className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(59,130,246,0.35)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600/45 to-indigo-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                    <div className="relative flex flex-row items-center justify-center gap-1.5 sm:gap-2.5 w-full h-full bg-[#1e293b] px-2.5 sm:px-5 py-3.5 sm:py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
                       <Download
-                        className={`w-4 h-4 text-blue-400 ${
+                        className={`w-4 h-4 shrink-0 text-blue-400 ${
                           cloudActionStatus === 'Uploading...' ? 'animate-bounce' : ''
                         }`}
                       />
-                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                      <span className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100 whitespace-nowrap">
                         {cloudActionStatus === 'Uploading...' && syncProgress === 100
                           ? 'Downloaded!'
                           : cloudActionStatus === 'Uploading...'
@@ -660,10 +660,10 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                     }`}
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-emerald-600/45 to-teal-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
-                      <Upload className="w-4 h-4 text-emerald-400" />
-                      <span className="text-sm font-semibold tracking-wide text-slate-100">
-                        Restore (Select File)
+                    <div className="relative flex flex-row items-center justify-center gap-1.5 sm:gap-2.5 w-full h-full bg-[#1e293b] px-2.5 sm:px-5 py-3.5 sm:py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                      <Upload className="w-4 h-4 shrink-0 text-emerald-400" />
+                      <span className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100 whitespace-nowrap">
+                        Restore (File)
                       </span>
                     </div>
                     <input
@@ -676,7 +676,7 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                   </label>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-lg">
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-4 w-full max-w-lg">
                   <button
                     type="button"
                     onClick={handleFirebasePush}
@@ -684,13 +684,13 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                     className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(59,130,246,0.35)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600/45 to-indigo-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                    <div className="relative flex flex-row items-center justify-center gap-1.5 sm:gap-2.5 w-full h-full bg-[#1e293b] px-2.5 sm:px-5 py-3.5 sm:py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
                       <Upload
-                        className={`w-4 h-4 text-blue-400 ${
+                        className={`w-4 h-4 shrink-0 text-blue-400 ${
                           cloudActionStatus === 'Uploading...' ? 'animate-bounce' : ''
                         }`}
                       />
-                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                      <span className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100 whitespace-nowrap">
                         {cloudActionStatus === 'Uploading...' && syncProgress === 100
                           ? 'Success!'
                           : cloudActionStatus === 'Uploading...'
@@ -707,13 +707,13 @@ export const StandaloneBackupPage: React.FC<StandaloneBackupPageProps> = ({ onBa
                     className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_18px_-5px_rgba(16,185,129,0.35)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-emerald-600/45 to-teal-600/45 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="relative flex flex-row items-center justify-center gap-2.5 w-full h-full bg-[#1e293b] px-5 py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
+                    <div className="relative flex flex-row items-center justify-center gap-1.5 sm:gap-2.5 w-full h-full bg-[#1e293b] px-2.5 sm:px-5 py-3.5 sm:py-4 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/85">
                       <Download
-                        className={`w-4 h-4 text-emerald-400 ${
+                        className={`w-4 h-4 shrink-0 text-emerald-400 ${
                           cloudActionStatus === 'Downloading...' ? 'animate-bounce' : ''
                         }`}
                       />
-                      <span className="text-sm font-semibold tracking-wide text-slate-100">
+                      <span className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100 whitespace-nowrap">
                         {cloudActionStatus === 'Downloading...' && syncProgress === 100
                           ? 'Success!'
                           : cloudActionStatus === 'Downloading...'

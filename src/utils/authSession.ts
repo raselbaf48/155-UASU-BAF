@@ -255,13 +255,15 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
 /**
  * Save detailed user logins
  */
-export const saveDetailedUsers = (users: DetailedUserLogin[]): void => {
+export const saveDetailedUsers = (users: DetailedUserLogin[], syncToCloud: boolean = true): void => {
   try {
     localStorage.setItem(DETAILED_USERS_KEY, JSON.stringify(users));
     window.dispatchEvent(new CustomEvent('baf_detailed_users_changed', { detail: users }));
-    
-    (localDb as any).db.detailedUsers = users;
-    localDb.forceSave();
+
+    if (syncToCloud) {
+      (localDb as any).db.detailedUsers = users;
+      localDb.forceSave();
+    }
   } catch (e) {
     console.error('Failed to save detailed user logins:', e);
   }
@@ -530,9 +532,9 @@ export const validateUserLogin = async (
         };
       }
 
-      // Update lastLoginAt
+      // Update lastLoginAt locally without triggering redundant cloud writes on idle login
       matchedDetail.lastLoginAt = new Date().toISOString();
-      saveDetailedUsers(detailedList);
+      saveDetailedUsers(detailedList, false);
 
       return {
         success: true,

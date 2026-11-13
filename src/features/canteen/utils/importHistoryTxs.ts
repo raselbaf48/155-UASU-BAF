@@ -134,16 +134,16 @@ export function deduplicateCanteenTransactions(txs: any[]): any[] {
  * - Deduplicates transactions so no double bills exist.
  * - Persists the clean, synchronized state to localStorage and Supabase.
  */
-export async function syncImportHistoryToTransactions(): Promise<any[]> {
+export async function syncImportHistoryToTransactions(skipCloudFetch = false): Promise<any[]> {
   if (typeof window === 'undefined') return [];
 
   try {
-    // 1. Load batches from localStorage & cloud
+    // 1. Load batches from localStorage & cloud only if missing locally
     let localBatches: BillImportBatch[] = [];
+    const rawBillHistory = localStorage.getItem('canteen_bill_import_history');
     try {
-      const raw = localStorage.getItem('canteen_bill_import_history');
-      if (raw) {
-        const parsed = JSON.parse(raw);
+      if (rawBillHistory) {
+        const parsed = JSON.parse(rawBillHistory);
         if (Array.isArray(parsed)) localBatches = parsed;
         else if (parsed && Array.isArray((parsed as any).batches)) localBatches = (parsed as any).batches;
         else if (parsed && Array.isArray((parsed as any).items)) localBatches = (parsed as any).items;
@@ -155,16 +155,18 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     } catch {}
 
     let cloudBatches: BillImportBatch[] = [];
-    try {
-      const pulled = await pullKeyFromCloud('canteen_bill_import_history');
-      if (Array.isArray(pulled)) cloudBatches = pulled;
-      else if (pulled && Array.isArray((pulled as any).batches)) cloudBatches = (pulled as any).batches;
-      else if (pulled && Array.isArray((pulled as any).items)) cloudBatches = (pulled as any).items;
-      else if (pulled && typeof pulled === 'object') {
-        const vals = Object.values(pulled);
-        if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') cloudBatches = vals as any;
-      }
-    } catch {}
+    if (!skipCloudFetch && rawBillHistory === null) {
+      try {
+        const pulled = await pullKeyFromCloud('canteen_bill_import_history');
+        if (Array.isArray(pulled)) cloudBatches = pulled;
+        else if (pulled && Array.isArray((pulled as any).batches)) cloudBatches = (pulled as any).batches;
+        else if (pulled && Array.isArray((pulled as any).items)) cloudBatches = (pulled as any).items;
+        else if (pulled && typeof pulled === 'object') {
+          const vals = Object.values(pulled);
+          if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') cloudBatches = vals as any;
+        }
+      } catch {}
+    }
 
     const batchMap = new Map<string, BillImportBatch>();
     [...(Array.isArray(cloudBatches) ? cloudBatches : []), ...(Array.isArray(localBatches) ? localBatches : [])].forEach(b => {
@@ -172,33 +174,39 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     });
     const allBatches = Array.from(batchMap.values());
 
-    // 2. Load transactions from localStorage & cloud
+    // 2. Load transactions from localStorage & cloud only if missing locally
     const localTxs: any[] = getSafeCanteenTransactions();
+    const hasLocalTxsKey = localStorage.getItem('canteen_txs') !== null;
 
     let cloudTxs: any[] = [];
-    try {
-      const pulled = await pullKeyFromCloud('canteen_txs');
-      if (Array.isArray(pulled)) cloudTxs = pulled;
-      else if (pulled && Array.isArray((pulled as any).txs)) cloudTxs = (pulled as any).txs;
-      else if (pulled && Array.isArray((pulled as any).transactions)) cloudTxs = (pulled as any).transactions;
-      else if (pulled && typeof pulled === 'object') {
-        const vals = Object.values(pulled);
-        if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') cloudTxs = vals as any;
-      }
-    } catch {}
+    if (!skipCloudFetch && !hasLocalTxsKey) {
+      try {
+        const pulled = await pullKeyFromCloud('canteen_txs');
+        if (Array.isArray(pulled)) cloudTxs = pulled;
+        else if (pulled && Array.isArray((pulled as any).txs)) cloudTxs = (pulled as any).txs;
+        else if (pulled && Array.isArray((pulled as any).transactions)) cloudTxs = (pulled as any).transactions;
+        else if (pulled && typeof pulled === 'object') {
+          const vals = Object.values(pulled);
+          if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') cloudTxs = vals as any;
+        }
+      } catch {}
+    }
 
     const deletedIds = getDeletedTxIds();
-    try {
-      const cloudDeleted = await pullKeyFromCloud('canteen_deleted_tx_ids');
-      if (Array.isArray(cloudDeleted)) {
-        cloudDeleted.forEach(id => deletedIds.add(String(id)));
-      }
-    } catch {}
+    if (!skipCloudFetch && localStorage.getItem('canteen_deleted_tx_ids') === null) {
+      try {
+        const cloudDeleted = await pullKeyFromCloud('canteen_deleted_tx_ids');
+        if (Array.isArray(cloudDeleted)) {
+          cloudDeleted.forEach(id => deletedIds.add(String(id)));
+        }
+      } catch {}
+    }
 
     const txMap = new Map<string, any>();
     [...(Array.isArray(localTxs) ? localTxs : []), ...(Array.isArray(cloudTxs) ? cloudTxs : [])].forEach(t => {
       if (t && t.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t);
     });
+    const beforeReconstructCount = txMap.size;
 
     // 3. For each import batch, ensure its members have their corresponding transactions
     for (const batch of allBatches) {
@@ -375,7 +383,7 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
           if (Array.isArray(parsed)) posBatches = parsed;
         } catch {}
       }
-      if (posBatches.length === 0) {
+      if (!skipCloudFetch && localPosRaw === null && posBatches.length === 0) {
         const pulled = await pullKeyFromCloud('canteen_pos_import_history');
         if (Array.isArray(pulled)) posBatches = pulled;
       }
@@ -410,14 +418,18 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
 
     // 4. Run deduplication
     const allTxsList = Array.from(txMap.values());
+    const reconstructedAny = txMap.size > beforeReconstructCount;
     const cleaned = deduplicateCanteenTransactions(allTxsList);
+    const removedAny = cleaned.length < localTxs.length;
 
-    // 5. Persist clean state to local and cloud only if changed
+    // 5. Persist clean state locally, and ONLY push to cloud if actual missing items were reconstructed or duplicates removed
     try {
+      const cleanedStr = JSON.stringify(cleaned);
       const prevRaw = localStorage.getItem('canteen_txs') || '[]';
-      const isChanged = cleaned.length !== localTxs.length || JSON.stringify(cleaned) !== prevRaw;
-      localStorage.setItem('canteen_txs', JSON.stringify(cleaned));
-      if (isChanged) {
+      if (cleanedStr !== prevRaw) {
+        localStorage.setItem('canteen_txs', cleanedStr);
+      }
+      if (!skipCloudFetch && (reconstructedAny || removedAny)) {
         queuePushKeyToCloud('canteen_txs', cleaned, 2000);
       }
     } catch (err) {

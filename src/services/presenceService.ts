@@ -30,7 +30,7 @@ export interface UserPresence {
 }
 
 const PRESENCE_STORAGE_KEY = 'baf_presence';
-const ACTIVE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes considered online
+const ACTIVE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes considered online
 
 const sanitizeDocId = (raw: string): string => {
   const cleaned = String(raw || 'unknown')
@@ -167,10 +167,11 @@ function startPresenceHeartbeat(bdNo: string) {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = setInterval(() => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     if (currentLoggedBdNo) {
       updatePresence(currentLoggedBdNo, false, '');
     }
-  }, 120 * 1000); // lightweight heartbeat every 2 minutes while active
+  }, 240 * 1000); // lightweight heartbeat every 4 minutes while active
 }
 
 export const logUserLogin = async (

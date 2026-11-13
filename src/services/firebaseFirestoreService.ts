@@ -344,7 +344,7 @@ export async function probeFirebaseConnectionAndQuota(forceServerCheck = false):
     return { ok: false, quotaExceeded: true, errorMsg: 'Firestore daily quota exceeded' };
   }
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await withFirestoreTimeout(getDocFromServer(doc(db, 'test', 'connection')), 8000, 'probe:connection');
     if (isFirestoreQuotaExceeded()) {
       setFirestoreQuotaExceeded(false);
     }
@@ -366,6 +366,15 @@ export async function checkFirebaseHealth(): Promise<boolean> {
 
 // -------------------- Chunked Batch Helper --------------------
 
+function withFirestoreTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Firestore ${label} timeout after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 async function commitSetOps(
   ops: Array<{ path: string; docId: string; data: Record<string, any> }>,
   collectionLabel: string
@@ -373,40 +382,40 @@ async function commitSetOps(
   if (!isFirebaseConfigured || !db || ops.length === 0) return 0;
   if (isFirestoreQuotaExceeded()) return 0;
 
-  const withTimeout = <T,>(promise: Promise<T>, ms = 25000): Promise<T> =>
-    Promise.race([
-      promise,
-      new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error(`Firestore write timeout after ${ms}ms in ${collectionLabel}`)), ms)
-      ),
-    ]);
-
   let written = 0;
   const CHUNK_SIZE = 350;
-
+  const chunks: Array<Array<{ path: string; docId: string; data: Record<string, any> }>> = [];
   for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
-    if (isFirestoreQuotaExceeded()) break;
-    const chunk = ops.slice(i, i + CHUNK_SIZE);
+    chunks.push(ops.slice(i, i + CHUNK_SIZE));
+  }
+
+  const processChunk = async (chunk: Array<{ path: string; docId: string; data: Record<string, any> }>) => {
+    if (isFirestoreQuotaExceeded()) return;
     try {
       const batch = writeBatch(db);
       for (const op of chunk) {
         batch.set(doc(db, op.path, op.docId), op.data, { merge: true });
       }
-      await withTimeout(batch.commit(), 25000);
+      await withFirestoreTimeout(batch.commit(), 15000, `batch:${collectionLabel}`);
       written += chunk.length;
     } catch (err: any) {
       if (isQuotaExceededError(err)) {
         setFirestoreQuotaExceeded(true, err?.message || `Quota exceeded writing ${collectionLabel}`);
         throw err;
       }
-      // Bounded parallel retry (20 at a time) so one invalid doc doesn't stall 350 sequential awaits
       const MINI_SIZE = 20;
       let loggedOnce = false;
       for (let j = 0; j < chunk.length; j += MINI_SIZE) {
         if (isFirestoreQuotaExceeded()) break;
         const mini = chunk.slice(j, j + MINI_SIZE);
         const results = await Promise.allSettled(
-          mini.map((op) => setDoc(doc(db, op.path, op.docId), op.data, { merge: true }))
+          mini.map((op) =>
+            withFirestoreTimeout(
+              setDoc(doc(db, op.path, op.docId), op.data, { merge: true }),
+              8000,
+              `setDoc:${op.path}/${op.docId}`
+            )
+          )
         );
         for (let k = 0; k < results.length; k++) {
           const r = results[k];
@@ -429,9 +438,34 @@ async function commitSetOps(
         }
       }
     }
+  };
+
+  // Run up to 3 batches in parallel so bulk writes complete 3x faster
+  const PARALLEL_BATCHES = 3;
+  for (let b = 0; b < chunks.length; b += PARALLEL_BATCHES) {
+    if (isFirestoreQuotaExceeded()) break;
+    await Promise.all(chunks.slice(b, b + PARALLEL_BATCHES).map(processChunk));
   }
 
   return written;
+}
+
+export async function fetchSyncManifestFromFirebase(): Promise<SyncManifest | null> {
+  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return null;
+  try {
+    const snap = await withFirestoreTimeout(
+      getDoc(doc(db, 'system_meta', 'sync_manifest')),
+      8000,
+      'get:sync_manifest'
+    );
+    if (!snap.exists()) return null;
+    return snap.data() as SyncManifest;
+  } catch (err: any) {
+    if (isQuotaExceededError(err)) {
+      setFirestoreQuotaExceeded(true, err?.message);
+    }
+    return null;
+  }
 }
 
 // -------------------- Sync Manifest --------------------
@@ -458,18 +492,22 @@ export async function publishSyncManifest(
     const safeCollections = changedCollections
       .filter((c) => typeof c === 'string' && c.trim().length > 0)
       .slice(0, 20);
-    await setDoc(
-      doc(db, 'system_meta', 'sync_manifest'),
-      {
-        id: 'sync_manifest',
-        revision: Date.now(),
-        updatedAt: nowIso,
-        updatedBySessionId: CLIENT_SESSION_ID.slice(0, 128),
-        updatedByBdNo: getCurrentBdNo() || 'system',
-        lastReason: clampStr(reason, 200) || 'delta_sync',
-        changedCollections: safeCollections,
-      },
-      { merge: true }
+    await withFirestoreTimeout(
+      setDoc(
+        doc(db, 'system_meta', 'sync_manifest'),
+        {
+          id: 'sync_manifest',
+          revision: Date.now(),
+          updatedAt: nowIso,
+          updatedBySessionId: CLIENT_SESSION_ID.slice(0, 128),
+          updatedByBdNo: getCurrentBdNo() || 'system',
+          lastReason: clampStr(reason, 200) || 'delta_sync',
+          changedCollections: safeCollections,
+        },
+        { merge: true }
+      ),
+      8000,
+      'set:sync_manifest'
     );
   } catch (err: any) {
     if (isQuotaExceededError(err)) {
@@ -570,7 +608,7 @@ export async function fetchAirmenFromFirebase(sinceIso?: string): Promise<any[]>
   try {
     const colRef = collection(db, 'airmen');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:airmen');
     const list: any[] = [];
     snap.forEach((docSnap) => {
       list.push(docSnap.data());
@@ -656,7 +694,7 @@ export async function fetchDutyAssignmentsFromFirebase(sinceIso?: string): Promi
   try {
     const colRef = collection(db, 'duty_assignments');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:duty_assignments');
     const list: any[] = [];
     snap.forEach((docSnap) => {
       list.push(docSnap.data());
@@ -720,7 +758,7 @@ export async function fetchParadeStatesFromFirebase(sinceIso?: string): Promise<
   try {
     const colRef = collection(db, 'parade_states');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:parade_states');
     const list: any[] = [];
     snap.forEach((docSnap) => {
       list.push(docSnap.data());
@@ -790,7 +828,7 @@ export async function fetchUserProfilesFromFirebase(sinceIso?: string): Promise<
   try {
     const colRef = collection(db, 'user_profiles');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:user_profiles');
     const list: any[] = [];
     snap.forEach((docSnap) => {
       list.push(docSnap.data());
@@ -844,7 +882,7 @@ export async function fetchAppSettingsWithMetaFromFirebase(
   try {
     const colRef = collection(db, 'app_settings');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:app_settings');
     const result: Record<string, { valueStr: string; rawValue: any; updatedAt: string; updatedBy?: string }> = {};
     snap.forEach((docSnap) => {
       const d = docSnap.data() as any;
@@ -969,7 +1007,7 @@ export async function fetchCanteenMembersFromFirebase(sinceIso?: string): Promis
   try {
     const colRef = collection(db, 'canteen_members');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:canteen_members');
     const list: any[] = [];
     snap.forEach((docSnap) => {
       list.push(hydrateCanteenMemberFromFirestore(docSnap.data()));
@@ -996,15 +1034,19 @@ export async function pushCanteenDataKeyToFirebase(
   const docId = sanitizeDocId(docKey);
   const nowIso = toIsoString(updatedAt || new Date().toISOString());
   try {
-    await setDoc(
-      doc(db, 'canteen_data', docId),
-      {
-        docKey: clampStr(docKey, 128) || docId,
-        value: encodeNativeSettingValue(value),
-        updatedAt: nowIso,
-        updatedBy: clampStr(getCurrentBdNo() || 'canteen_user', 128) || 'canteen_user',
-      },
-      { merge: true }
+    await withFirestoreTimeout(
+      setDoc(
+        doc(db, 'canteen_data', docId),
+        {
+          docKey: clampStr(docKey, 128) || docId,
+          value: encodeNativeSettingValue(value),
+          updatedAt: nowIso,
+          updatedBy: clampStr(getCurrentBdNo() || 'canteen_user', 128) || 'canteen_user',
+        },
+        { merge: true }
+      ),
+      10000,
+      `set:canteen_data/${docKey}`
     );
     return true;
   } catch (err: any) {
@@ -1024,7 +1066,7 @@ export async function fetchCanteenDataFromFirebase(
   try {
     const colRef = collection(db, 'canteen_data');
     const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:canteen_data');
     const list: Array<{ docKey: string; value: any; updatedAt: string; updatedBy?: string }> = [];
     snap.forEach((docSnap) => {
       const d = docSnap.data() as any;
@@ -1050,7 +1092,11 @@ export async function fetchCanteenDataFromFirebase(
 export async function fetchSingleCanteenDocFromFirebase(docKey: string): Promise<any | null> {
   if (!isFirebaseConfigured || !db || !docKey || isFirestoreQuotaExceeded()) return null;
   try {
-    const snap = await getDoc(doc(db, 'canteen_data', sanitizeDocId(docKey)));
+    const snap = await withFirestoreTimeout(
+      getDoc(doc(db, 'canteen_data', sanitizeDocId(docKey))),
+      8000,
+      `get:canteen_data/${docKey}`
+    );
     if (!snap.exists()) return null;
     const d = snap.data() as any;
     return d?.value ?? null;

@@ -7,6 +7,7 @@ import {
   fetchCanteenMembersFromFirebase,
   publishSyncManifest,
   subscribeToSyncManifest,
+  fetchSyncManifestFromFirebase,
   probeFirebaseConnectionAndQuota,
   getPendingDeltaQueue,
   recordPendingDeltas,
@@ -216,6 +217,38 @@ const lastSyncedCloudHashes = new Map<string, string>();
 const SINGLE_USER_CANTEEN_BACKUP_MS = 30 * 60 * 1000; // 30 minutes
 const MULTI_USER_CANTEEN_BACKUP_MS = 10 * 1000; // 10 seconds
 const CANTEEN_LAST_PULL_KEY = 'canteen_last_firebase_pull_at';
+const CANTEEN_MEMBERS_LAST_PULL_KEY = 'canteen_members_last_firebase_pull_at';
+const CANTEEN_LAST_REVISION_KEY = 'canteen_last_handled_sync_revision';
+
+function seedCanteenBaselineHashes() {
+  if (typeof window === 'undefined') return;
+  const pendingMap = getPendingDeltaQueue().canteenData || {};
+  for (const key of CANTEEN_CLOUD_KEYS) {
+    if (pendingMap[key] || lastSyncedCloudHashes.has(key)) continue;
+    const raw = localStorage.getItem(key);
+    if (raw !== null) {
+      lastSyncedCloudHashes.set(key, raw);
+    }
+  }
+  if (!pendingMap['canteen_menu_items_catalog_v1'] && !lastSyncedCloudHashes.has('canteen_menu_items_catalog_v1')) {
+    const menuRaw = localStorage.getItem('canteen_menu_items_list') || localStorage.getItem('canteen_menu_cache');
+    if (menuRaw !== null) lastSyncedCloudHashes.set('canteen_menu_items_catalog_v1', menuRaw);
+  }
+  if (!pendingMap['baf_canteen_settings_v1'] && !lastSyncedCloudHashes.has('baf_canteen_settings_v1')) {
+    const cfgRaw = localStorage.getItem('baf_canteen_settings_v1') || localStorage.getItem('canteen_config');
+    if (cfgRaw !== null) lastSyncedCloudHashes.set('baf_canteen_settings_v1', cfgRaw);
+  }
+}
+
+function recordCanteenHandledRevision(revision?: number) {
+  if (!revision || typeof window === 'undefined') return;
+  try {
+    const prev = Number(localStorage.getItem(CANTEEN_LAST_REVISION_KEY) || '0') || 0;
+    if (revision > prev) {
+      localStorage.setItem(CANTEEN_LAST_REVISION_KEY, String(revision));
+    }
+  } catch {}
+}
 
 // Dirty change tracking for adaptive automatic backup to Firebase
 const dirtyCanteenKeys = new Set<string>();
@@ -226,6 +259,7 @@ let isCanteenBackingUp = false;
 let isInitialCanteenPullDone = false;
 let isCanteenPulling = false;
 let isApplyingCloudPull = false;
+let activeCanteenPullPromise: Promise<void> | null = null;
 
 export const getIsInitialCanteenPullDone = (): boolean => isInitialCanteenPullDone;
 
@@ -1066,56 +1100,43 @@ function dispatchKeyUpdateEvent(key: string) {
 /**
  * Pull all Canteen keys from Firebase Firestore (or Local Cloud Storage on quota exceeded) and reconcile deltas
  */
-export async function pullAllCanteenDataFromCloud(options?: { isLoginSync?: boolean; isQuotaRecovery?: boolean }): Promise<void> {
-  notifyStatus({ status: 'syncing' });
-  isCanteenPulling = true;
-  isApplyingCloudPull = true;
+export async function pullAllCanteenDataFromCloud(options?: { isLoginSync?: boolean; isQuotaRecovery?: boolean; forceFullPull?: boolean }): Promise<void> {
+  if (activeCanteenPullPromise) {
+    return activeCanteenPullPromise;
+  }
 
-  try {
-    let data: Array<{ setting_key: string; setting_value: any; updated_at?: string }> | null = null;
-    let fetchError: any = null;
-    let usedLocalFallback = false;
+  activeCanteenPullPromise = (async () => {
+    notifyStatus({ status: 'syncing' });
+    isCanteenPulling = true;
+    isApplyingCloudPull = true;
 
-    if (isFirebaseConfigured) {
-      if (options?.isLoginSync || options?.isQuotaRecovery || isFirestoreQuotaExceeded()) {
-        const probe = await probeFirebaseConnectionAndQuota(Boolean(options?.isLoginSync || options?.isQuotaRecovery));
-        if (probe.quotaExceeded || isFirestoreQuotaExceeded()) {
-          usedLocalFallback = true;
-          if (options?.isLoginSync && typeof window !== 'undefined') {
-            window.dispatchEvent(
-              new CustomEvent('baf_login_quota_exceeded_popup', {
-                detail: {
-                  source: 'login',
-                  message: probe.errorMsg || 'Firebase daily quota exceeded. Switching to Local Cloud Storage.',
-                  upgradeUrl: getQuotaConsoleUpgradeUrl(),
-                },
-              })
-            );
-          }
-        }
+    const watchdogTimer = setTimeout(() => {
+      if (isCanteenPulling || isApplyingCloudPull) {
+        isApplyingCloudPull = false;
+        isCanteenPulling = false;
+        isInitialCanteenPullDone = true;
+        activeCanteenPullPromise = null;
+        notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
       }
+    }, 45000);
 
-      if (!usedLocalFallback && !isFirestoreQuotaExceeded()) {
-        try {
-          const fbDocs = await fetchCanteenDataFromFirebase();
-          if (fbDocs && fbDocs.length > 0) {
-            data = fbDocs.map((d) => ({
-              setting_key: d.docKey,
-              setting_value: d.value,
-              updated_at: d.updatedAt,
-            }));
-          }
-        } catch (err: any) {
-          fetchError = err;
-          if (isQuotaExceededError(err)) {
-            setFirestoreQuotaExceeded(true, err?.message);
+    try {
+      let data: Array<{ setting_key: string; setting_value: any; updated_at?: string }> | null = null;
+      let fetchError: any = null;
+      let usedLocalFallback = false;
+      let useSinceIso: string | undefined = undefined;
+
+      if (isFirebaseConfigured) {
+        if (options?.isLoginSync || options?.isQuotaRecovery || isFirestoreQuotaExceeded()) {
+          const probe = await probeFirebaseConnectionAndQuota(Boolean(options?.isLoginSync || options?.isQuotaRecovery));
+          if (probe.quotaExceeded || isFirestoreQuotaExceeded()) {
             usedLocalFallback = true;
             if (options?.isLoginSync && typeof window !== 'undefined') {
               window.dispatchEvent(
                 new CustomEvent('baf_login_quota_exceeded_popup', {
                   detail: {
                     source: 'login',
-                    message: err?.message || 'Firebase daily quota exceeded.',
+                    message: probe.errorMsg || 'Firebase daily quota exceeded. Switching to Local Cloud Storage.',
                     upgradeUrl: getQuotaConsoleUpgradeUrl(),
                   },
                 })
@@ -1123,46 +1144,111 @@ export async function pullAllCanteenDataFromCloud(options?: { isLoginSync?: bool
             }
           }
         }
-      }
-    }
 
-    // Fallback to Local Cloud Storage (/api/canteen/all-settings) when quota exceeded or Firebase empty
-    if (usedLocalFallback || fetchError || !data || data.length === 0) {
-      try {
-        const rawFetcher = (typeof window !== 'undefined' && (window as any).__baf_raw_fetch) || fetch;
-        const localRes = await rawFetcher('/api/canteen/all-settings');
-        if (localRes.ok) {
-          const localSettings = await localRes.json();
-          if (Array.isArray(localSettings) && localSettings.length > 0) {
-            data = localSettings.filter((s: any) => s && s.setting_key && (s.setting_key.startsWith('canteen_') || s.setting_key.startsWith('baf_')));
-            fetchError = null;
+        if (!usedLocalFallback && !isFirestoreQuotaExceeded()) {
+          const lastCanteenPullIso = typeof window !== 'undefined' ? localStorage.getItem(CANTEEN_LAST_PULL_KEY) || '' : '';
+          const hasLocalCanteenCache = typeof window !== 'undefined' && Boolean(
+            localStorage.getItem('canteen_txs') || localStorage.getItem('canteen_menu_cache')
+          );
+          const pendingQ = getPendingDeltaQueue();
+          const hasCanteenPending = dirtyCanteenKeys.size > 0 || Object.keys(pendingQ.canteenData || {}).length > 0;
+          const canUseIncremental = !options?.forceFullPull && Boolean(lastCanteenPullIso) && hasLocalCanteenCache;
+
+          if (canUseIncremental) {
+            const manifest = await fetchSyncManifestFromFirebase();
+            const manifestMs = manifest?.updatedAt ? Date.parse(manifest.updatedAt) || 0 : 0;
+            const lastPullMs = Date.parse(lastCanteenPullIso) || 0;
+            if (manifest?.revision) recordCanteenHandledRevision(manifest.revision);
+            if (manifest && manifestMs > 0 && manifestMs <= lastPullMs && !hasCanteenPending) {
+              seedCanteenBaselineHashes();
+              notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+              return;
+            }
+            if (manifest) {
+              useSinceIso = lastCanteenPullIso;
+            }
+          }
+
+          try {
+            const fbDocs = await fetchCanteenDataFromFirebase(useSinceIso);
+            if (fbDocs && fbDocs.length > 0) {
+              data = fbDocs.map((d) => ({
+                setting_key: d.docKey,
+                setting_value: d.value,
+                updated_at: d.updatedAt,
+              }));
+            }
+          } catch (err: any) {
+            fetchError = err;
+            if (isQuotaExceededError(err)) {
+              setFirestoreQuotaExceeded(true, err?.message);
+              usedLocalFallback = true;
+              if (options?.isLoginSync && typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('baf_login_quota_exceeded_popup', {
+                    detail: {
+                      source: 'login',
+                      message: err?.message || 'Firebase daily quota exceeded.',
+                      upgradeUrl: getQuotaConsoleUpgradeUrl(),
+                    },
+                  })
+                );
+              }
+            }
           }
         }
-      } catch (lErr) {
-        console.warn('[CanteenCloudSync] Local server fallback notice:', lErr);
       }
-    }
 
-    if (fetchError && (!data || data.length === 0)) {
-      const hasLocalKeys = typeof window !== 'undefined' && Boolean(
-        localStorage.getItem('canteen_daily_menu') ||
-        localStorage.getItem('canteen_txs') ||
-        localStorage.getItem('canteen_menu_cache') ||
-        localStorage.getItem('canteen_members_cache') ||
-        localStorage.getItem('canteen_settings')
-      );
-      if (hasLocalKeys) {
-        notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+      // If incremental pull succeeded with 0 changed docs and no local pending keys, finish quickly
+      if (useSinceIso && !usedLocalFallback && !fetchError && (!data || data.length === 0)) {
+        const pendingQ = getPendingDeltaQueue();
+        const hasCanteenPending = dirtyCanteenKeys.size > 0 || Object.keys(pendingQ.canteenData || {}).length > 0;
+        if (!hasCanteenPending) {
+          seedCanteenBaselineHashes();
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(CANTEEN_LAST_PULL_KEY, new Date().toISOString());
+          }
+          notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+          return;
+        }
+      }
+
+      // Fallback to Local Cloud Storage (/api/canteen/all-settings) when quota exceeded or Firebase empty on full pull
+      if (usedLocalFallback || fetchError || (!useSinceIso && (!data || data.length === 0))) {
+        try {
+          const rawFetcher = (typeof window !== 'undefined' && (window as any).__baf_raw_fetch) || fetch;
+          const localRes = await rawFetcher('/api/canteen/all-settings');
+          if (localRes.ok) {
+            const localSettings = await localRes.json();
+            if (Array.isArray(localSettings) && localSettings.length > 0) {
+              data = localSettings.filter((s: any) => s && s.setting_key && (s.setting_key.startsWith('canteen_') || s.setting_key.startsWith('baf_')));
+              fetchError = null;
+            }
+          }
+        } catch (lErr) {
+          console.warn('[CanteenCloudSync] Local server fallback notice:', lErr);
+        }
+      }
+
+      if (fetchError && (!data || data.length === 0)) {
+        const hasLocalKeys = typeof window !== 'undefined' && Boolean(
+          localStorage.getItem('canteen_daily_menu') ||
+          localStorage.getItem('canteen_txs') ||
+          localStorage.getItem('canteen_menu_cache') ||
+          localStorage.getItem('canteen_members_cache') ||
+          localStorage.getItem('canteen_settings')
+        );
+        if (hasLocalKeys) {
+          notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+          return;
+        }
+        notifyStatus({ status: 'error', errorMessage: fetchError?.message || 'Sync error' });
         return;
       }
-      notifyStatus({ status: 'error', errorMessage: fetchError?.message || 'Sync error' });
-      return;
-    }
 
-    if (!data || data.length === 0) {
-      notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
-      return;
-    }
+      if (!data || data.length === 0) {
+        data = [];
+      }
 
     const cloudKeyMap = new Map<string, any>();
     const cloudUpdatedMap = new Map<string, string>();
@@ -1465,26 +1551,39 @@ export async function pullAllCanteenDataFromCloud(options?: { isLoginSync?: bool
         : `Downloaded latest Canteen data (${cloudKeyMap.size} records) from Firebase Firestore.`,
     });
 
-    try {
-      const { syncImportHistoryToTransactions } = await import('./importHistoryTxs');
-      await syncImportHistoryToTransactions();
-    } catch (recErr) {
-      console.warn('[CanteenCloudSync] syncImportHistoryToTransactions notice:', recErr);
+    const shouldReconcileImports =
+      cloudKeyMap.has('canteen_bill_import_history') ||
+      cloudKeyMap.has('canteen_pos_import_history') ||
+      cloudKeyMap.has('canteen_txs') ||
+      cloudKeyMap.has('canteen_deleted_tx_ids');
+
+    if (shouldReconcileImports) {
+      try {
+        const { syncImportHistoryToTransactions } = await import('./importHistoryTxs');
+        await syncImportHistoryToTransactions(true);
+      } catch (recErr) {
+        console.warn('[CanteenCloudSync] syncImportHistoryToTransactions notice:', recErr);
+      }
     }
-  } catch (err: any) {
-    console.warn('[CanteenCloudSync] Pull exception:', err);
-    notifyStatus({ status: 'error', errorMessage: err?.message || 'Network error' });
-    addCanteenSyncLog({
-      timestamp: new Date().toISOString(),
-      type: 'PULL',
-      status: 'ERROR',
-      message: 'Failed to download updates: ' + (err?.message || 'Network error'),
-    });
-  } finally {
-    isApplyingCloudPull = false;
-    isCanteenPulling = false;
-    isInitialCanteenPullDone = true;
-  }
+    } catch (err: any) {
+      console.warn('[CanteenCloudSync] Pull exception:', err);
+      notifyStatus({ status: 'error', errorMessage: err?.message || 'Network error' });
+      addCanteenSyncLog({
+        timestamp: new Date().toISOString(),
+        type: 'PULL',
+        status: 'ERROR',
+        message: 'Failed to download updates: ' + (err?.message || 'Network error'),
+      });
+    } finally {
+      clearTimeout(watchdogTimer);
+      isApplyingCloudPull = false;
+      isCanteenPulling = false;
+      isInitialCanteenPullDone = true;
+      activeCanteenPullPromise = null;
+    }
+  })();
+
+  return activeCanteenPullPromise;
 }
 
 /**
@@ -1654,11 +1753,24 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
       return;
     }
 
-    // Smart Delta-Sync via Firebase Firestore canteen_members
+    // Smart Delta-Sync via Firebase Firestore canteen_members (manifest fast-path + incremental sinceIso)
     let cloudData: any[] = [];
     if (isFirebaseConfigured && !isFirestoreQuotaExceeded()) {
       try {
-        cloudData = await fetchCanteenMembersFromFirebase();
+        const lastMemberPullIso = localStorage.getItem(CANTEEN_MEMBERS_LAST_PULL_KEY) || '';
+        if (lastMemberPullIso) {
+          const manifest = await fetchSyncManifestFromFirebase();
+          const manifestMs = manifest?.updatedAt ? Date.parse(manifest.updatedAt) || 0 : 0;
+          const lastPullMs = Date.parse(lastMemberPullIso) || 0;
+          if (manifest && manifestMs > 0 && manifestMs <= lastPullMs) {
+            return;
+          }
+          cloudData = await fetchCanteenMembersFromFirebase(lastMemberPullIso);
+          localStorage.setItem(CANTEEN_MEMBERS_LAST_PULL_KEY, new Date().toISOString());
+        } else {
+          cloudData = await fetchCanteenMembersFromFirebase();
+          localStorage.setItem(CANTEEN_MEMBERS_LAST_PULL_KEY, new Date().toISOString());
+        }
       } catch (fbErr) {
         console.warn('[CanteenCloudSync] Firestore member pull notice:', fbErr);
       }
@@ -1808,6 +1920,9 @@ export function initCanteenCloudSync(): () => void {
   }
   isInitialized = true;
 
+  // Seed known hashes first so boot UI hydration never triggers false dirty writes
+  seedCanteenBaselineHashes();
+
   // 1. Initial Pull from Firebase (or Local Cloud if quota full)
   pullAllCanteenDataFromCloud({ isLoginSync: false });
   syncCanteenMembersFromCloud();
@@ -1821,20 +1936,32 @@ export function initCanteenCloudSync(): () => void {
 
   // 2. Subscribe to Firebase sync_manifest for multi-user real-time updates
   let manifestUnsub: (() => void) | null = null;
-  let lastCanteenRevision = 0;
+  let lastCanteenRevision = Number(localStorage.getItem(CANTEEN_LAST_REVISION_KEY) || '0') || 0;
 
   const attachCanteenManifest = () => {
     if (!isFirebaseConfigured || isFirestoreQuotaExceeded() || manifestUnsub) return;
     manifestUnsub = subscribeToSyncManifest((manifest) => {
       if (!manifest || manifest.updatedBySessionId === CLIENT_SESSION_ID) return;
-      if (manifest.revision && manifest.revision <= lastCanteenRevision) return;
-      lastCanteenRevision = manifest.revision || Date.now();
+      const storedRev = Number(localStorage.getItem(CANTEEN_LAST_REVISION_KEY) || '0') || 0;
+      const effectiveRev = Math.max(lastCanteenRevision, storedRev);
+      if (manifest.revision && manifest.revision <= effectiveRev) return;
+
+      const manifestMs = manifest.updatedAt ? Date.parse(manifest.updatedAt) || 0 : 0;
+      const lastDataPullMs = Date.parse(localStorage.getItem(CANTEEN_LAST_PULL_KEY) || '') || 0;
+      const lastMemPullMs = Date.parse(localStorage.getItem(CANTEEN_MEMBERS_LAST_PULL_KEY) || '') || 0;
       const cols = manifest.changedCollections || [];
-      if (cols.includes('canteen_data')) {
+
+      const needData = cols.includes('canteen_data') && (!lastDataPullMs || manifestMs > lastDataPullMs);
+      const needMembers = cols.includes('canteen_members') && (!lastMemPullMs || manifestMs > lastMemPullMs);
+
+      lastCanteenRevision = manifest.revision || Date.now();
+      recordCanteenHandledRevision(lastCanteenRevision);
+
+      if (needData) {
         pullAllCanteenDataFromCloud({ isLoginSync: false }).catch(() => {});
       }
-      if (cols.includes('canteen_members')) {
-        syncCanteenMembersFromCloud(true).catch(() => {});
+      if (needMembers) {
+        syncCanteenMembersFromCloud(false).catch(() => {});
       }
     });
   };
