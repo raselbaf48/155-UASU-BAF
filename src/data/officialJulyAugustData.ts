@@ -863,8 +863,8 @@ export function generateOfficialMonthAssignments(year: number, month: number): D
         if (yestDuty) {
           if (yestDuty.dutyCode === 'IDAC' || yestDuty.dutyCode === 'IDA') {
             offNote = 'IDAC Nt Off';
-          } else if (yestDuty.dutyCode === 'GD') {
-            offNote = 'GD Off';
+          } else if (yestDuty.dutyCode === 'GD' || (yestDuty.dutyCode as any) === 'SY') {
+            offNote = 'SY Off';
           } else if (yestDuty.dutyCode === 'BTF') {
             offNote = 'BTF Off';
           } else if (yestDuty.dutyCode === 'NTF') {

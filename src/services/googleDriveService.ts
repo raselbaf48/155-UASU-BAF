@@ -34,7 +34,11 @@ let isSigningIn = false;
 let autoBackupTimer: any = null;
 let lastBackupTimeCached: string | null = (() => {
   if (typeof window !== 'undefined') {
-    return window.localStorage.getItem('baf_drive_last_backup') || null;
+    try {
+      return window.localStorage.getItem('baf_drive_last_backup') || null;
+    } catch {
+      return null;
+    }
   }
   return null;
 })();
@@ -66,10 +70,12 @@ function getEffectiveDriveEmail(): string | null {
       }
     } catch {}
 
-    const saved = window.localStorage.getItem('baf_drive_user_email');
-    if (saved && !saved.includes('@155uasu.baf')) {
-      return saved;
-    }
+    try {
+      const saved = window.localStorage.getItem('baf_drive_user_email');
+      if (saved && !saved.includes('@155uasu.baf')) {
+        return saved;
+      }
+    } catch {}
   }
   return null;
 }
@@ -84,7 +90,11 @@ function getEffectiveDriveName(): string | null {
         if (parsed.name) return parsed.name;
       }
     } catch {}
-    return window.localStorage.getItem('baf_drive_user_name') || null;
+    try {
+      return window.localStorage.getItem('baf_drive_user_name') || null;
+    } catch {
+      return null;
+    }
   }
   return null;
 }

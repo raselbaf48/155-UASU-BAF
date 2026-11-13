@@ -76,12 +76,46 @@
     <script>
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(regs) {
-          for (let r of regs) r.unregister();
-        });
+          for (var i = 0; i < regs.length; i++) regs[i].unregister();
+        }).catch(function() {});
       }
+      window.__bafPreMountError = function(msg) {
+        var root = document.getElementById('root');
+        if (!root || !document.getElementById('baf-boot-loader')) return;
+        var title = document.getElementById('baf-boot-status');
+        var errBox = document.getElementById('baf-boot-error');
+        var retryBtn = document.getElementById('baf-boot-retry');
+        if (title) title.textContent = '155 UASU BAF • Loading Issue';
+        if (errBox) {
+          errBox.textContent = String(msg || 'Failed to load application modules.');
+          errBox.style.display = 'block';
+        }
+        if (retryBtn) retryBtn.style.display = 'inline-flex';
+      };
+      window.addEventListener('error', function(e) {
+        if (e && (e.message || e.filename)) {
+          window.__bafPreMountError((e.message || 'Script error') + (e.filename ? ' (' + e.filename + ')' : ''));
+        }
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var reason = e && e.reason ? (e.reason.message || String(e.reason)) : '';
+        if (!reason || reason.indexOf('WebSocket') !== -1 || reason.indexOf('@vite/client') !== -1) return;
+        window.__bafPreMountError(reason);
+      });
     </script>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="root">
+      <div id="baf-boot-loader" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:Inter,system-ui,-apple-system,sans-serif;background:#020617;color:#f8fafc;">
+        <div style="width:48px;height:48px;border-radius:14px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+          <div style="width:22px;height:22px;border:2.5px solid rgba(52,211,153,0.25);border-top-color:#34d399;border-radius:50%;animation:baf_spin 0.8s linear infinite;"></div>
+        </div>
+        <div id="baf-boot-status" style="font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#e2e8f0;">155 UASU BAF</div>
+        <div style="margin-top:6px;font-size:11px;color:#94a3b8;">Loading portal...</div>
+        <div id="baf-boot-error" style="display:none;margin-top:16px;max-width:420px;padding:10px 12px;border-radius:10px;background:#0f172a;border:1px solid #334155;color:#fda4af;font-size:11px;font-family:monospace;word-break:break-word;"></div>
+        <button id="baf-boot-retry" type="button" onclick="window.location.reload()" style="display:none;margin-top:14px;padding:9px 18px;border-radius:10px;border:none;background:#059669;color:#ffffff;font-size:12px;font-weight:700;cursor:pointer;">Reload Application</button>
+      </div>
+      <style>@keyframes baf_spin{to{transform:rotate(360deg)}}</style>
+    </div>
+    <script type="module" src="/src/main.tsx" onerror="window.__bafPreMountError && window.__bafPreMountError('Failed to fetch /src/main.tsx')"></script>
   </body>
 </html>
 

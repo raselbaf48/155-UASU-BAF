@@ -1770,7 +1770,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                     <span>2. Select Duty Category</span>
                     {bulkDutyCode === 'GD' && (
                       <span className="text-[10px] font-extrabold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/80 px-1.5 py-0.5 rounded border border-red-300 dark:border-red-800">
-                        GD: Cpl & Below
+                        SY: Cpl & Below
                       </span>
                     )}
                   </label>

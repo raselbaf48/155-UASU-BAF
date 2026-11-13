@@ -11,7 +11,7 @@ export const INITIAL_DUTY_TYPES: DutyTypeInfo[] = [
     badgeBg: 'bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700',
     badgeText: 'text-red-800 dark:text-red-300',
     isCountedAsDuty: true,
-    description: 'Security Duty (Sy Duty)',
+    description: 'Security Duty (SY)',
   },
   {
     code: 'BTF',

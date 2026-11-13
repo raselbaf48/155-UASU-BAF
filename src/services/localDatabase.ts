@@ -88,13 +88,21 @@ let lastSyncedMatrixRaw: string = '';
 let firebaseConnected: boolean = (() => {
   if (isFirebaseConfigured) return true;
   if (typeof window !== 'undefined') {
-    return window.localStorage.getItem('baf_cloud_connected') === 'true';
+    try {
+      return window.localStorage.getItem('baf_cloud_connected') === 'true';
+    } catch {
+      return false;
+    }
   }
   return false;
 })();
 let firebaseLastSyncTime: string | null = (() => {
   if (typeof window !== 'undefined') {
-    return window.localStorage.getItem('baf_cloud_last_sync') || null;
+    try {
+      return window.localStorage.getItem('baf_cloud_last_sync') || null;
+    } catch {
+      return null;
+    }
   }
   return null;
 })();
@@ -309,6 +317,18 @@ function isSyncableSettingKey(key: string): boolean {
   return SETTING_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
+function isCorruptedAssignmentRecord(a: any): boolean {
+  if (!a || typeof a !== 'object') return true;
+  const idStr = String(a.id || '').trim();
+  const airId = String(a.airmanId || '').trim();
+  if (idStr === 'test' || airId === 'test') return true;
+  const match = idStr.match(/^asn_.*?_(\d{4}-\d{2}-\d{2})_/);
+  if (match && a.date && match[1] !== String(a.date).trim()) {
+    return true;
+  }
+  return false;
+}
+
 export class LocalDatabaseEngine {
   public db: LocalStorageDB;
   private isFirebaseSyncing: boolean = false;
@@ -330,10 +350,12 @@ export class LocalDatabaseEngine {
     this.db = this.loadInitialLocalState();
     this.lastSyncedDbStr = this.stripTimestampForCompare(this.db);
     if (typeof window !== 'undefined') {
-      this.lastPullAt = window.localStorage.getItem(LAST_FIREBASE_PULL_KEY) || '';
-      this.lastHandledRevision = Number(window.localStorage.getItem(LAST_HANDLED_REVISION_KEY) || '0') || 0;
-      this.seedBaselineSettingsMap();
-      window.localStorage.removeItem('baf_pending_sync');
+      try {
+        this.lastPullAt = window.localStorage.getItem(LAST_FIREBASE_PULL_KEY) || '';
+        this.lastHandledRevision = Number(window.localStorage.getItem(LAST_HANDLED_REVISION_KEY) || '0') || 0;
+        this.seedBaselineSettingsMap();
+        window.localStorage.removeItem('baf_pending_sync');
+      } catch {}
       this.pullDatabaseFromServer();
       this.pullAllSettingsFromServer();
       if (!this.db.activityHistory || this.db.activityHistory.length < 25) {
@@ -580,7 +602,7 @@ export class LocalDatabaseEngine {
       if (srvDb.assignments && typeof srvDb.assignments === 'object' && (!this.isInitialPullDone || isFirestoreQuotaExceeded())) {
         if (!this.db.assignments) this.db.assignments = {};
         Object.keys(srvDb.assignments).forEach((mKey) => {
-          const incoming = srvDb.assignments[mKey] || [];
+          const incoming = (srvDb.assignments[mKey] || []).filter((a: any) => !isCorruptedAssignmentRecord(a));
           if (JSON.stringify(this.db.assignments[mKey] || []) !== JSON.stringify(incoming)) {
             this.db.assignments[mKey] = incoming;
             changed = true;
@@ -864,6 +886,13 @@ export class LocalDatabaseEngine {
           });
           return true;
         }
+        if (!probe.ok) {
+          console.warn('[localDatabase] Firebase unreachable on probe, using Local Cloud Storage:', probe.errorMsg);
+          await this.pullDatabaseFromServer();
+          await this.pullAllSettingsFromServer();
+          this.isInitialPullDone = true;
+          return false;
+        }
       }
 
       emitSyncProgress(15, 'Checking Firebase sync manifest...');
@@ -905,13 +934,30 @@ export class LocalDatabaseEngine {
       const useSinceIso = canUseIncremental && manifest ? this.lastPullAt : undefined;
       emitSyncProgress(30, useSinceIso ? 'Fetching recent changes from Firebase...' : 'Fetching database from Firebase Firestore...');
 
-      const [fbAirmen, fbAssignments, fbHistory, fbUsers, fbSettingsMeta] = await Promise.all([
-        fetchAirmenFromFirebase(useSinceIso),
-        fetchDutyAssignmentsFromFirebase(useSinceIso),
-        fetchParadeStatesFromFirebase(useSinceIso),
-        fetchUserProfilesFromFirebase(useSinceIso),
-        fetchAppSettingsWithMetaFromFirebase(useSinceIso),
-      ]);
+      let fbAirmen: any[];
+      let fbAssignments: any[];
+      let fbHistory: any[];
+      let fbUsers: any[];
+      let fbSettingsMeta: Record<string, { valueStr: string; rawValue: any; updatedAt: string; updatedBy?: string }>;
+
+      if (useSinceIso) {
+        [fbAirmen, fbAssignments, fbHistory, fbUsers, fbSettingsMeta] = await Promise.all([
+          fetchAirmenFromFirebase(useSinceIso),
+          fetchDutyAssignmentsFromFirebase(useSinceIso),
+          fetchParadeStatesFromFirebase(useSinceIso),
+          fetchUserProfilesFromFirebase(useSinceIso),
+          fetchAppSettingsWithMetaFromFirebase(useSinceIso),
+        ]);
+      } else {
+        // Fetch lightweight collections first so the large duty_assignments payload does not starve them
+        [fbAirmen, fbHistory, fbUsers, fbSettingsMeta] = await Promise.all([
+          fetchAirmenFromFirebase(),
+          fetchParadeStatesFromFirebase(),
+          fetchUserProfilesFromFirebase(),
+          fetchAppSettingsWithMetaFromFirebase(),
+        ]);
+        fbAssignments = await fetchDutyAssignmentsFromFirebase();
+      }
 
       emitSyncProgress(60, 'Reconciling cloud & local records...');
 
@@ -1013,6 +1059,7 @@ export class LocalDatabaseEngine {
       if (useSinceIso) {
         Object.values(this.db.assignments || {}).forEach((monthList) => {
           (monthList || []).forEach((a) => {
+            if (isCorruptedAssignmentRecord(a)) return;
             const docId = getAssignmentDocId(a);
             mergedAsnMap.set(docId, {
               item: a,
@@ -1024,11 +1071,15 @@ export class LocalDatabaseEngine {
       }
 
       fbAssignments.forEach((a: any) => {
-        const docId = getAssignmentDocId(a);
+        const corrupted = isCorruptedAssignmentRecord(a);
+        const cleanItem = a && !String(a.dutyCode || '').trim()
+          ? { ...a, dutyCode: 'ON_PARADE' }
+          : a;
+        const docId = getAssignmentDocId(cleanItem);
         mergedAsnMap.set(docId, {
-          item: a,
-          isDeleted: Boolean(a.isDeleted),
-          updatedAtMs: this.parseTimeMs(a.updatedAt),
+          item: cleanItem,
+          isDeleted: corrupted || Boolean(cleanItem.isDeleted),
+          updatedAtMs: this.parseTimeMs(cleanItem.updatedAt),
         });
       });
 
@@ -1360,12 +1411,16 @@ export class LocalDatabaseEngine {
         if (incAsn.length > 0) {
           const byId = new Map<string, any>();
           Object.values(newDb.assignments || {}).forEach((list) => {
-            (list || []).forEach((a) => byId.set(getAssignmentDocId(a), a));
+            (list || []).forEach((a) => {
+              if (!isCorruptedAssignmentRecord(a)) {
+                byId.set(getAssignmentDocId(a), a);
+              }
+            });
           });
           incAsn.forEach((ca: any) => {
             const docId = getAssignmentDocId(ca);
             if (pendingQueue.assignments[docId]) return;
-            if (ca.isDeleted) {
+            if (ca.isDeleted || isCorruptedAssignmentRecord(ca)) {
               if (byId.has(docId)) {
                 byId.delete(docId);
                 dbChanged = true;
@@ -1968,12 +2023,17 @@ export class LocalDatabaseEngine {
               }
             });
 
-            // DEDUPLICATE ASSIGNMENTS
+            // DEDUPLICATE ASSIGNMENTS & FILTER CORRUPTED RECORDS
+            let hadCorruptedAssignments = false;
             Object.keys(migratedAssignments).forEach((m) => {
               const list = migratedAssignments[m] || [];
               const seenAsn = new Set<string>();
               const cleanList: any[] = [];
               list.forEach((asn: any) => {
+                if (isCorruptedAssignmentRecord(asn)) {
+                  hadCorruptedAssignments = true;
+                  return;
+                }
                 const airDigits = String(asn.airmanId || '').replace(/\D/g, '');
                 const shift = asn.idaShift || asn.shift || 'n';
                 const scope = asn.disposalScope || 'ALL';
@@ -1997,8 +2057,8 @@ export class LocalDatabaseEngine {
               lastUpdated: parsed.lastUpdated || new Date().toISOString(),
             };
 
-            // If duplicates were purged from localStorage, immediately save the clean DB
-            if (dedupedAirmen.length !== parsed.airmen.length) {
+            // If duplicates or corrupted entries were purged from localStorage, immediately save the clean DB
+            if (dedupedAirmen.length !== parsed.airmen.length || hadCorruptedAssignments) {
               try {
                 if (typeof window !== 'undefined' && window.localStorage) {
                   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
@@ -2420,7 +2480,9 @@ export class LocalDatabaseEngine {
       else if (n.includes('AIR')) sanitizedCode = 'AIRPORT';
       else if (n.includes('IDAC')) sanitizedCode = 'IDAC';
       else if (n.includes('CANTEEN')) sanitizedCode = 'CANTEEN';
-      else sanitizedCode = 'GD';
+      else if (/\b(GD|SY|SECURITY|GUARD)\b/.test(n)) sanitizedCode = 'GD';
+      else if (n && !['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(n)) sanitizedCode = 'OTHERS';
+      else sanitizedCode = 'ON_PARADE';
     }
 
     const prevAssignment = index >= 0 ? { ...list[index] } : null;
@@ -2541,7 +2603,9 @@ export class LocalDatabaseEngine {
         else if (n.includes('AIR')) sanitizedCode = 'AIRPORT';
         else if (n.includes('IDAC')) sanitizedCode = 'IDAC';
         else if (n.includes('CANTEEN')) sanitizedCode = 'CANTEEN';
-        else sanitizedCode = 'GD';
+        else if (/\b(GD|SY|SECURITY|GUARD)\b/.test(n)) sanitizedCode = 'GD';
+        else if (n && !['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(n)) sanitizedCode = 'OTHERS';
+        else sanitizedCode = 'ON_PARADE';
       }
 
       const assignment: DutyAssignment = {
@@ -2782,6 +2846,9 @@ export class LocalDatabaseEngine {
       if (!assignment) return { onParadeOnDutyDay: false, dutyOffNextDay: false, onPtNextDay: true };
       const code = String(assignment.dutyCode || '').trim();
       const codeUpper = code.toUpperCase();
+      if (!codeUpper || ['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT'].includes(codeUpper)) {
+        return { onParadeOnDutyDay: false, dutyOffNextDay: false, onPtNextDay: true };
+      }
       const name = String((assignment as any)?.dutyName || '').trim();
       const notes = String(assignment.notes || '').trim();
       const s = (assignment.idaShift || '').trim().toLowerCase();
@@ -2867,7 +2934,7 @@ export class LocalDatabaseEngine {
           (s === 'night' || s === 'c' || s === 'nt' || notes.toLowerCase().includes('night'));
         const isEscortDuty = codeUpper === 'ESCORT' || codeUpper === 'ESC' || codeUpper === 'ESCT' ||
           codeUpper.includes('1794394') || name.toLowerCase().includes('escort') || notes.toLowerCase().includes('escort');
-        const isClassicHeavy = ['GD', 'BTF', 'NTF', 'AIRPORT', 'AIRFIELD', 'ATT', 'HALISHAHAR'].includes(codeUpper) || isIdacNt || isEscortDuty;
+        const isClassicHeavy = ['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'AIRPORT', 'AIRFIELD', 'ATT', 'HALISHAHAR'].includes(codeUpper) || isIdacNt || isEscortDuty;
         dutyOffNextDay = isClassicHeavy;
       }
 
@@ -3149,25 +3216,25 @@ export class LocalDatabaseEngine {
           const yestRule = getDutyRule(yestAss);
 
           if (yestRule.dutyOffNextDay) {
-            let offShort = 'GD Off';
+            let offShort = 'SY Off';
+            const yCodeUpper = String(yestAss.dutyCode || '').toUpperCase().trim();
             if (
-              (yestAss.dutyCode as any) === 'ESCORT' ||
-              (yestAss.dutyCode as any) === 'ESC' ||
-              (yestAss.dutyCode as any) === 'ESCT' ||
-              String(yestAss.dutyCode || '').includes('1794394') ||
+              yCodeUpper === 'ESCORT' ||
+              yCodeUpper === 'ESC' ||
+              yCodeUpper === 'ESCT' ||
+              yCodeUpper.includes('1794394') ||
               (yestAss.dutyName || '').toLowerCase().includes('escort') ||
               (yestAss.notes || '').toLowerCase().includes('escort') ||
               (yestRule.matchedTitle || '').toLowerCase().includes('escort')
             ) offShort = 'Esct Off';
-            else if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
-            else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
-            else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
-            else if (yestAss.dutyCode === 'AIRPORT' || (yestAss.dutyCode as any) === 'AIRFIELD') offShort = 'Airfield Off';
-            else if (yestAss.dutyCode === 'HALISHAHAR') offShort = 'Halishahar Off';
-            else if ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
+            else if (['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY'].includes(yCodeUpper)) offShort = 'SY Off';
+            else if (yCodeUpper === 'BTF') offShort = 'BTF Off';
+            else if (yCodeUpper === 'NTF') offShort = 'NTF Off';
+            else if (yCodeUpper === 'AIRPORT' || yCodeUpper === 'AIRFIELD') offShort = 'Airfield Off';
+            else if (yCodeUpper === 'HALISHAHAR') offShort = 'Halishahar Off';
+            else if ((yCodeUpper === 'IDAC' || yCodeUpper === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
             else if (yestAss.notes?.toLowerCase().includes('idac') || yestAss.previousDutyName?.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
-            else if (yestAss.dutyCode === 'DUTY_OFF') offShort = yestAss.previousDutyName || yestAss.notes || 'GD Off';
-            else if (yestAss.dutyCode === 'ON_PARADE') offShort = 'GD Off';
+            else if (yCodeUpper === 'DUTY_OFF') offShort = yestAss.previousDutyName || yestAss.notes || 'SY Off';
             else if (yestRule.matchedTitle) offShort = `${yestRule.matchedTitle} Off`;
             else offShort = `${yestAss.dutyCode} Off`;
 
@@ -3176,6 +3243,8 @@ export class LocalDatabaseEngine {
               .replace(/Escort Off/g, 'Esct Off')
               .replace(/ESC Off/g, 'Esct Off')
               .replace(/ESCT Off/g, 'Esct Off')
+              .replace(/\bGD Off\b/gi, 'SY Off')
+              .replace(/\bSy Off\b/g, 'SY Off')
               .replace(/DUTY_OFF/g, 'Duty')
               .replace(/Off Off/g, 'Off')
               .replace(/Duty Off Off/g, 'Duty Off');
@@ -3222,11 +3291,10 @@ export class LocalDatabaseEngine {
       const isApplicable = scope === 'ALL' || (isPT && scope === 'PT') || (isNightCount && scope === 'NIGHT_COUNT') || (!isPT && !isNightCount && scope === 'PARADE');
 
       if (ass && isApplicable) {
-        let dutyName: string = ((ass as any)?.dutyName || '').trim() || String(ass.dutyCode);
-        let statusCategory: string = 'DUTY';
+        let codeStr = String(ass.dutyCode || 'ON_PARADE').trim() || 'ON_PARADE';
+        let dutyName: string = ((ass as any)?.dutyName || '').trim() || codeStr;
+        let statusCategory: string = 'OTHERS';
         let previousDutyName: string | undefined = undefined;
-
-        let codeStr = String(ass.dutyCode).trim();
 
         if (codeStr.startsWith('CUST_') || codeStr.includes('1794394') || dutyName.startsWith('CUST_') || dutyName.includes('1794394')) {
           const resolved = getCustomDutyName(codeStr) || getCustomDutyName(dutyName);
@@ -3235,6 +3303,7 @@ export class LocalDatabaseEngine {
           } else if (codeStr.includes('1794394') || dutyName.includes('1794394')) {
             dutyName = 'Escort Duty';
           }
+          statusCategory = 'DUTY';
         }
 
         // If dutyCode is generic 'DUTY' or 'DUTY_ON', resolve to real disposal from notes, dutyName, or Master Disposals
@@ -3272,11 +3341,35 @@ export class LocalDatabaseEngine {
           }
         }
 
-        if (codeStr === 'GD') dutyName = 'Base Security Duty';
-        else if (codeStr === 'BTF') dutyName = 'Base Taskforce Duty';
-        else if (codeStr === 'NTF') dutyName = 'Najirpara Taskforce Duty';
-        else if (codeStr === 'HALISHAHAR') dutyName = 'Halishahar Duty';
-        else if (codeStr === 'AIRPORT' || codeStr === 'AIRFIELD' || codeStr === 'ATT' || codeStr === 'DETT') dutyName = 'Airfield';
+        const codeUpper = codeStr.toUpperCase().trim();
+
+        if (['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT'].includes(codeUpper)) {
+          dutyName = isPT ? 'On PT' : 'On Parade';
+          statusCategory = 'PARADE';
+        }
+        else if (['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY'].includes(codeUpper)) {
+          dutyName = 'Base Security Duty';
+          statusCategory = 'DUTY';
+        }
+        else if (codeUpper === 'BTF') {
+          dutyName = 'Base Taskforce Duty';
+          statusCategory = 'DUTY';
+        }
+        else if (codeUpper === 'NTF') {
+          dutyName = 'Najirpara Taskforce Duty';
+          statusCategory = 'DUTY';
+        }
+        else if (codeUpper === 'HALISHAHAR') {
+          dutyName = 'Halishahar Duty';
+          statusCategory = 'DUTY';
+        }
+        else if (codeUpper === 'AIRPORT' || codeUpper === 'AIRFIELD' || codeUpper === 'AIR_FD') {
+          dutyName = 'Airfield';
+          statusCategory = 'DUTY';
+        }
+        else if (codeUpper === 'ESCORT' || codeUpper === 'ESC' || codeUpper === 'ESCT' || codeUpper.startsWith('CUST_') || codeUpper.includes('1794394')) {
+          statusCategory = 'DUTY';
+        }
         else if (codeStr.includes('ORDERLY')) {
           dutyName = 'Orderly Room';
           statusCategory = 'OTHERS';
@@ -3363,10 +3456,10 @@ export class LocalDatabaseEngine {
         else if (codeStr === 'DUTY_OFF') {
           const yestAss = findInAssignmentMap(yestMap, airmanId);
           const yestRule = yestAss ? getDutyRule(yestAss) : undefined;
-          let offShort = 'GD Off';
+          let offShort = 'SY Off';
 
           if (yestAss) {
-            const yestCodeStr = String(yestAss.dutyCode);
+            const yestCodeStr = String(yestAss.dutyCode || '').toUpperCase().trim();
             if (
               yestCodeStr === 'ESCORT' ||
               yestCodeStr === 'ESC' ||
@@ -3376,21 +3469,21 @@ export class LocalDatabaseEngine {
               (yestAss.notes || '').toLowerCase().includes('escort') ||
               (yestRule?.matchedTitle || '').toLowerCase().includes('escort')
             ) offShort = 'Esct Off';
-            else if (yestCodeStr === 'GD') offShort = 'GD Off';
+            else if (['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY'].includes(yestCodeStr)) offShort = 'SY Off';
             else if (yestCodeStr === 'BTF') offShort = 'BTF Off';
             else if (yestCodeStr === 'NTF') offShort = 'NTF Off';
             else if (yestCodeStr === 'AIRPORT' || yestCodeStr === 'AIRFIELD' || yestCodeStr === 'ATT' || yestCodeStr === 'DETT') offShort = 'Airfield Off';
             else if (yestCodeStr === 'HALISHAHAR') offShort = 'Halishahar Off';
             else if ((yestCodeStr === 'IDAC' || yestCodeStr === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
             else if (yestAss.notes?.toLowerCase().includes('idac') || yestAss.previousDutyName?.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
-            else if (yestCodeStr === 'DUTY_OFF') offShort = yestAss.previousDutyName || 'GD Off';
-            else if (yestCodeStr === 'ON_PARADE') offShort = 'GD Off';
+            else if (yestCodeStr === 'DUTY_OFF') offShort = yestAss.previousDutyName || 'Duty Off';
+            else if (yestCodeStr === 'ON_PARADE' || yestCodeStr === 'PT' || yestCodeStr === 'PT_PARADE') offShort = 'Duty Off';
             else if (yestRule?.matchedTitle) offShort = `${yestRule.matchedTitle} Off`;
             else offShort = `${yestAss.dutyCode} Off`;
           } else if (ass.notes && !ass.notes.toLowerCase().includes('imported')) {
             if (ass.notes.toLowerCase().includes('escort') || ass.notes.toLowerCase().includes('esct')) offShort = 'Esct Off';
             else if (ass.notes.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
-            else if (ass.notes.toLowerCase().includes('gd')) offShort = 'GD Off';
+            else if (/\bgd\b/i.test(ass.notes) || /\bsy\b/i.test(ass.notes) || ass.notes.toLowerCase().includes('security')) offShort = 'SY Off';
             else if (ass.notes.toLowerCase().includes('btf')) offShort = 'BTF Off';
             else if (ass.notes.toLowerCase().includes('ntf')) offShort = 'NTF Off';
             else if (ass.notes.toLowerCase().includes('airport')) offShort = 'Airfield Off';
@@ -3403,6 +3496,8 @@ export class LocalDatabaseEngine {
             .replace(/Escort Off/g, 'Esct Off')
             .replace(/ESC Off/g, 'Esct Off')
             .replace(/ESCT Off/g, 'Esct Off')
+            .replace(/\bGD Off\b/gi, 'SY Off')
+            .replace(/\bSy Off\b/g, 'SY Off')
             .replace(/DUTY_OFF/g, 'Duty')
             .replace(/Off Off/g, 'Off')
             .replace(/Duty Off Off/g, 'Duty Off');
@@ -3524,6 +3619,9 @@ export class LocalDatabaseEngine {
         }
 
         const todayRule = getDutyRule(ass);
+        if (todayRule.matchedTitle && statusCategory === 'OTHERS' && !['OTHERS', 'DEPLOYMENT'].includes(codeUpper)) {
+          statusCategory = 'DUTY';
+        }
         if (todayRule.onParadeOnDutyDay && (statusCategory === 'DUTY' || statusCategory === 'PARADE')) {
           if (!isPT && !isNightCount) {
             statusCategory = 'PARADE';

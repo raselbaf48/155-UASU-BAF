@@ -1,17 +1,18 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
 import { getCanteenMembersCache } from '../features/canteen/utils/canteenMembersCache';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
-import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee, Loader2, Sparkles, Check } from 'lucide-react';
+import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, Eye, EyeOff, Building2, Coffee, Loader2, Sparkles, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
-
 import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
-import { NightCountStateView } from './NightCountStateView';
-import { AppUpdateModal } from './AppUpdateModal';
+
+const AppUpdateModal = lazy(() =>
+  import('./AppUpdateModal').then((m) => ({ default: m.AppUpdateModal }))
+);
 
 import { setUserSession, validateUserLogin, getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
 import {
@@ -132,7 +133,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
     const handlePortalChanged = (e: any) => {
       const p = e.detail?.portal;
-      if (p && (p === 'Office' || p === 'Nt Count' || p === 'Canteen')) {
+      if (p && (p === 'Office' || p === 'Canteen')) {
         setTimeout(() => {
           setActiveTab((prev) => (prev === p ? prev : p));
         }, 0);
@@ -633,12 +634,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   };
 
   return (
-    <div className={`min-h-screen flex flex-col items-center bg-slate-950 print:bg-white p-4 print:p-0 select-none overflow-x-hidden print:overflow-visible ${activeTab === 'Nt Count' ? 'justify-start pt-4 print:pt-0' : 'justify-center'}`}>
+    <div className="min-h-screen flex flex-col items-center bg-slate-950 print:bg-white p-4 print:p-0 select-none overflow-x-hidden print:overflow-visible justify-center">
       <div className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
-      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[325px] sm:max-w-[340px] relative z-10'}`}>
+      <div className={`w-full ${(activeTab === 'Canteen' && isCanteenAuth) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[325px] sm:max-w-[340px] relative z-10'}`}>
         
         {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
           <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 sm:space-y-5 text-white text-center mb-16">
@@ -1115,29 +1116,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           </div>
         )}
 
-        {activeTab === 'Nt Count' && (
-          <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col print:static print:bg-white print:text-black print:overflow-visible">
-            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
-              <button 
-                onClick={() => handlePortalChange('Office')}
-                className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span className="font-bold text-sm">Back</span>
-              </button>
-              <h2 className="ml-4 text-white font-bold tracking-widest text-sm opacity-50">NIGHT COUNT STATE</h2>
-            </div>
-            <div className="flex-1 p-4 sm:p-6 w-full max-w-7xl mx-auto print:p-0 print:max-w-none">
-                <NightCountStateView
-                  role="USER"
-                  airmen={airmen}
-                  selectedDate={selectedDate}
-                  setSelectedDate={setSelectedDate}
-                />
-            </div>
-          </div>
-        )}
-
         {activeTab === 'Canteen' && isCanteenAuth && (
           <CanteenLayout 
              initialMember={successAirman ? { 
@@ -1188,24 +1166,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               )}
               <Building2 className="w-4 h-4 relative z-10" />
               <span className="relative z-10">Office</span>
-            </button>
-            <button
-              onClick={() => handlePortalChange('Nt Count')}
-              className={`relative flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors cursor-pointer overflow-hidden ${
-                activeTab === 'Nt Count' 
-                  ? 'text-white' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700'
-              }`}
-            >
-              {activeTab === 'Nt Count' && (
-                <motion.span
-                  layoutId="loginPortalActivePill"
-                  className="absolute inset-0 bg-emerald-600 rounded-xl shadow-md z-0"
-                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                />
-              )}
-              <Moon className="w-4 h-4 relative z-10" />
-              <span className="relative z-10">Nt Count</span>
             </button>
             <button
               onClick={() => handlePortalChange('Canteen')}

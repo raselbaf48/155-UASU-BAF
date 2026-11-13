@@ -549,9 +549,9 @@ export const validateUserLogin = async (
   // 3. Cloud Fallback: Firebase Firestore (if local check failed or PIN was updated on another device)
   try {
     if (isFirebaseConfigured && !isFirestoreQuotaExceeded()) {
-      const fetchPromise = fetchUserProfilesFromFirebase();
+      const fetchPromise = fetchUserProfilesFromFirebase(undefined, 2000).catch(() => []);
       const timeoutPromise = new Promise<any[]>((resolve) =>
-        setTimeout(() => resolve([]), 1500)
+        setTimeout(() => resolve([]), 2200)
       );
 
       const fbUsers = await Promise.race([fetchPromise, timeoutPromise]);
@@ -630,8 +630,8 @@ export const validateUserLogin = async (
         };
       } else {
         // Fallback: check canteen_members in Firestore
-        const memPromise = fetchCanteenMembersFromFirebase();
-        const memTimeout = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 1500));
+        const memPromise = fetchCanteenMembersFromFirebase(undefined, 2000).catch(() => []);
+        const memTimeout = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 2200));
         const fbMembers = await Promise.race([memPromise, memTimeout]);
         const cm = fbMembers.find((m: any) => {
           const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();

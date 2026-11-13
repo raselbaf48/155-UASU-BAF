@@ -276,9 +276,9 @@ export function getAirmanDisposalForRange(
           (yestDuty.notes || '').toLowerCase().includes('idac') ||
           isEscortDuty;
         if (isNight) {
-          let offName = 'GD Off';
+          let offName = 'SY Off';
           if (isEscortDuty) offName = 'Esct Off';
-          else if (yestDuty.dutyCode === 'GD') offName = 'GD Off';
+          else if (yestDuty.dutyCode === 'GD' || (yestDuty.dutyCode as any) === 'SY') offName = 'SY Off';
           else if (yestDuty.dutyCode === 'BTF') offName = 'BTF Off';
           else if (yestDuty.dutyCode === 'NTF') offName = 'NTF Off';
           else if (yestDuty.dutyCode === 'AIRPORT') offName = 'Airport Off';

@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   getDocFromServer,
   Firestore,
@@ -32,7 +33,18 @@ let authInstance: Auth | null = null;
 if (isFirebaseConfigured) {
   try {
     appInstance = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-    dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+    try {
+      dbInstance = initializeFirestore(
+        appInstance,
+        {
+          experimentalForceLongPolling: true,
+          ignoreUndefinedProperties: true,
+        },
+        firebaseConfig.firestoreDatabaseId
+      );
+    } catch {
+      dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+    }
     authInstance = getAuth(appInstance);
   } catch (err) {
     console.warn('[Firebase] Initialization notice:', err);
@@ -227,8 +239,14 @@ export function handleFirestoreError(
 
 export async function testConnection(): Promise<boolean> {
   if (!isFirebaseConfigured || !dbInstance || isFirestoreQuotaExceeded()) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await getDocFromServer(doc(dbInstance, 'test', 'connection'));
+    await Promise.race([
+      getDocFromServer(doc(dbInstance, 'test', 'connection')),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Firestore connection test timeout after 8000ms')), 8000);
+      }),
+    ]);
     if (isFirestoreQuotaExceeded()) {
       setFirestoreQuotaExceeded(false);
     }
@@ -243,6 +261,8 @@ export async function testConnection(): Promise<boolean> {
       console.error('Please check your Firebase configuration.');
     }
     return false;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

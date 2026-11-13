@@ -115,14 +115,14 @@ export const DutyCellPopover: React.FC<DutyCellPopoverProps> = ({
           </div>
         </div>
 
-        {/* Security Duty (GD) Rank Restriction Warning for Sgt / WO */}
+        {/* Security Duty (SY) Rank Restriction Warning for Sgt / WO */}
         {selectedCode === 'GD' && (
           <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-xs text-red-800 dark:text-red-300 space-y-1">
             <div className="font-extrabold flex items-center space-x-1.5 text-red-700 dark:text-red-400">
-              <span>⚠️ Security Duty (GD) Rank Protocol:</span>
+              <span>⚠️ Security Duty (SY) Rank Protocol:</span>
             </div>
             <p className="text-[11px] leading-relaxed">
-              Under military regulations, <span className="font-bold underline">Sgt, WO, SWO, and MWO</span> personnel are strictly prohibited from Guard / Security Duty (GD). GD is reserved exclusively for <span className="font-bold">Cpl and LAC</span> ranks.
+              Under military regulations, <span className="font-bold underline">Sgt, WO, SWO, and MWO</span> personnel are strictly prohibited from Guard / Security Duty (SY). SY is reserved exclusively for <span className="font-bold">Cpl and LAC</span> ranks.
             </p>
           </div>
         )}

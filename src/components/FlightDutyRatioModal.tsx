@@ -30,7 +30,7 @@ interface DutyRatioItemConfig {
 }
 
 const CONFIGURABLE_DUTY_ITEMS: DutyRatioItemConfig[] = [
-  { tableId: 'security_duty', title: 'BASE SECURITY DUTY', dutyCode: 'GD', badgeBg: 'bg-blue-100 dark:bg-blue-950', badgeText: 'text-blue-700 dark:text-blue-300', shortName: 'GD', defaultMonthly: 88, perPersonBase: 'CPL_AND_BELOW' },
+  { tableId: 'security_duty', title: 'BASE SECURITY DUTY', dutyCode: 'GD', badgeBg: 'bg-blue-100 dark:bg-blue-950', badgeText: 'text-blue-700 dark:text-blue-300', shortName: 'SY', defaultMonthly: 88, perPersonBase: 'CPL_AND_BELOW' },
   { tableId: 'base_tf', title: 'BASE TASKFORCE DUTY', dutyCode: 'BTF', badgeBg: 'bg-sky-100 dark:bg-sky-950', badgeText: 'text-sky-700 dark:text-sky-300', shortName: 'BTF', defaultMonthly: 22, perPersonBase: 'SGT_AND_BELOW' },
   { tableId: 'nazirpara_tf', title: 'NAZIRPARA TASKFORCE', dutyCode: 'NTF', badgeBg: 'bg-amber-100 dark:bg-amber-950', badgeText: 'text-amber-700 dark:text-amber-300', shortName: 'NTF', defaultMonthly: 40, perPersonBase: 'SGT_AND_BELOW' },
   { tableId: 'idac_mor', title: 'IDAC MORNING', dutyCode: 'IDAC', shiftLabel: 'Morning', badgeBg: 'bg-yellow-100 dark:bg-yellow-950', badgeText: 'text-yellow-800 dark:text-yellow-300', shortName: 'IDAC-MOR', defaultMonthly: 31, perPersonBase: 'SGT_AND_BELOW' },

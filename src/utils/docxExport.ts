@@ -829,8 +829,9 @@ export async function exportParadeStateSingleDocx(
 
   // Format Duty Off as: `${rank} ${name} - ${duty} Off`
   const dutyOffDisplay = dutyOff.map((item) => {
-    let dutyNote = item.note || 'GD Off';
-    if (dutyNote.toLowerCase().includes('imported')) dutyNote = 'GD Off';
+    let dutyNote = item.note || 'SY Off';
+    if (dutyNote.toLowerCase().includes('imported')) dutyNote = 'SY Off';
+    if (dutyNote === 'GD Off' || dutyNote === 'GD') dutyNote = 'SY Off';
     if (!dutyNote.toLowerCase().endsWith('off')) {
       dutyNote = `${dutyNote} Off`;
     }
@@ -840,7 +841,8 @@ export async function exportParadeStateSingleDocx(
   });
 
   const dutyOnDisplay = dutyOn.map((item) => {
-    const dutyNote = item.note && !item.note.toLowerCase().includes('imported') ? item.note : 'GD';
+    let dutyNote = item.note && !item.note.toLowerCase().includes('imported') ? item.note : 'SY';
+    if (dutyNote === 'GD' || dutyNote === 'Sy Duty') dutyNote = 'SY';
     return {
       displayName: `${formatRank(item.airman.rank)} ${formatRunningLetter(item.airman.name)} - ${dutyNote}`,
     };
@@ -1517,7 +1519,7 @@ export async function exportMonthlyDutyRegisterDocx(
         createArialHeaderCell(String(i + 1), 260)
       ),
       createArialHeaderCell('Present', 650),
-      createArialHeaderCell('GD', 350),
+      createArialHeaderCell('SY', 350),
       createArialHeaderCell('BTF', 350),
       createArialHeaderCell('NTF', 350),
       createArialHeaderCell('Total Duty', 650),
@@ -1537,7 +1539,7 @@ export async function exportMonthlyDutyRegisterDocx(
       const ass = assignmentMap.get(`${a.id}_${dStr}`);
       let codeDisplay = 'P';
       if (ass) {
-        if (ass.dutyCode === 'GD') { codeDisplay = 'GD'; gdCount++; totalDutyCount++; }
+        if (ass.dutyCode === 'GD' || (ass.dutyCode as any) === 'SY') { codeDisplay = 'SY'; gdCount++; totalDutyCount++; }
         else if (ass.dutyCode === 'BTF') { codeDisplay = 'BTF'; btfCount++; totalDutyCount++; }
         else if (ass.dutyCode === 'NTF') { codeDisplay = 'NTF'; ntfCount++; totalDutyCount++; }
         else if (ass.dutyCode === 'HALISHAHAR') { codeDisplay = 'HAL'; totalDutyCount++; }

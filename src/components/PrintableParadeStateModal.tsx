@@ -39,6 +39,7 @@ import {
  PenTool,
  CheckSquare,
 Settings,
+ Copy,
 } from 'lucide-react';
 import { DutyCellPopover } from './DutyCellPopover';
 import { getStoredDutyRatiosForDate } from '../data/dutyRatios';
@@ -58,6 +59,7 @@ import {
 import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
 import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
 import { formatRank, formatAirmanName } from '../utils/rankFormatter';
+import { getWeekdayShort } from '../utils/holidayUtils';
 
 interface PrintableParadeStateModalProps {
  isOpen?: boolean;
@@ -102,7 +104,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  onOpenPrintModal = () => {},
  onViewAirmanProfile,
   onDownloadDocx,
- initialHideEmptyColumns = false,
+ initialHideEmptyColumns = true,
   onOpenImportModal = () => {},
   customDocumentHeader,
 }) => {
@@ -113,7 +115,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const [fromDate, setFromDate] = useState<string>(initialFromDate || selectedDate || (date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
  const [toDate, setToDate] = useState<string>(initialToDate || selectedDate || (date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
  const [selectedFlight, setSelectedFlight] = useState<FlightName | 'Overall'>(flight || initialFlight || 'Overall');
- const [hideEmptyColumns, setHideEmptyColumns] = useState<boolean>(initialHideEmptyColumns);
+ const hideEmptyColumns = true;
 
  
 
@@ -221,6 +223,10 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const [ratioRefreshTrigger, setRatioRefreshTrigger] = useState<number>(0);
  const [filterByRatio, setFilterByRatio] = useState<boolean>(true);
  const [activePreset, setActivePreset] = useState<'today' | '7days' | '15days' | 'month' | 'custom'>('today');
+ const [dateMode, setDateMode] = useState<'single' | 'multi'>(
+   initialFromDate && initialToDate && initialFromDate !== initialToDate ? 'multi' : 'single'
+ );
+ const [copiedText, setCopiedText] = useState<boolean>(false);
 
  // Keep fromDate/toDate in sync when parent selectedDate updates
  
@@ -429,10 +435,12 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const todayStr = `${yyyy}-${mm}-${dd}`;
 
  if (type === 'today') {
+ setDateMode('single');
  setFromDate(todayStr);
  setToDate(todayStr);
  setSelectedDate(todayStr);
  } else if (type === '7days') {
+ setDateMode('multi');
  const baseDateStr = fromDate || todayStr;
  const [bY, bM, bD] = baseDateStr.split('-').map(Number);
  const target = new Date(bY, bM - 1, bD);
@@ -442,6 +450,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const tD = String(target.getDate()).padStart(2, '0');
  setToDate(`${tY}-${tM}-${tD}`);
  } else if (type === '15days') {
+ setDateMode('multi');
  const baseDateStr = fromDate || todayStr;
  const [bY, bM, bD] = baseDateStr.split('-').map(Number);
  const target = new Date(bY, bM - 1, bD);
@@ -451,6 +460,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const tD = String(target.getDate()).padStart(2, '0');
  setToDate(`${tY}-${tM}-${tD}`);
  } else if (type === 'month') {
+ setDateMode('multi');
  const baseDateStr = fromDate || todayStr;
  const [bY, bM] = baseDateStr.split('-').map(Number);
  const firstDay = `${bY}-${String(bM).padStart(2, '0')}-01`;
@@ -593,7 +603,8 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  else if (noteUpper.includes('AIR') || noteUpper.includes('AIRPORT')) resolvedCode = 'AIRPORT';
  else if (noteUpper.includes('IDAC')) resolvedCode = 'IDAC';
  else if (noteUpper.includes('CANTEEN')) resolvedCode = 'CANTEEN';
- else resolvedCode = 'GD';
+ else if (/\b(GD|SY|SECURITY|GUARD)\b/.test(noteUpper)) resolvedCode = 'GD';
+ else resolvedCode = 'OTHERS';
  }
 
  const isStandardCat = [
@@ -653,7 +664,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const isCustom = activeCategory === 'OTHERS';
  let effectiveDutyCode = isCustom ? 'OTHERS' : activeCategory;
  if (effectiveDutyCode === 'DUTY' || effectiveDutyCode === 'DUTY_ON') {
- effectiveDutyCode = 'GD';
+ effectiveDutyCode = 'OTHERS';
  }
  const effectiveNotes = isCustom ? (editDisposalCustomTitle.trim() || 'Custom Disposal') : undefined;
 
@@ -807,7 +818,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  absentCount++;
  } else if (codeUpper === 'CANTEEN' || statusCategory === 'CANTEEN') {
  if (isPtDocument) { koReceptionCount++; } else { canteenCount++; }
- } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'DUTY_OFF'].includes(codeUpper) || statusCategory === 'DUTY' || statusCategory === 'OFF') {
+ } else if (['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'DUTY_OFF', 'ESCORT', 'ESC', 'ESCT'].includes(codeUpper) || codeUpper.startsWith('CUST_') || codeUpper.includes('1794394') || statusCategory === 'OFF') {
  guardDutyCount++;
  } else {
  othersCount++;
@@ -953,7 +964,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
        } else if (codeUpper === 'DUTY_OFF' || statusCategory === 'OFF') {
  const offName = formatDutyOffShortName(item.previousDutyCode, item.previousDutyName, item.dutyName || notes);
  dutyOffList.push({ airman, note: offName });
- } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
+ } else if ((['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD', 'ESCORT', 'ESC', 'ESCT'].includes(codeUpper) || codeUpper.startsWith('CUST_') || codeUpper.includes('1794394') || statusCategory === 'DUTY') && !['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT', ''].includes(codeUpper)) {
  const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, item.dutyName);
  dutyOnList.push({ airman, note: dutyDisplay });
  } else {
@@ -1023,9 +1034,9 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const isDutyOff = dutyCode === 'DUTY_OFF';
  let noteText = item.note && !item.note.toLowerCase().includes('imported') ? item.note : '';
  if (isDutyOn && (noteText.toUpperCase() === 'DUTY' || noteText.toUpperCase() === 'DUTY_ON' || !noteText)) {
- noteText = 'GD';
+ noteText = 'Duty';
  }
- const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'GD') : dutyCode;
+ const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'OTHERS') : dutyCode;
 
  return (
  <li
@@ -1062,11 +1073,156 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  );
  };
 
+ const singleWeekday = getWeekdayShort(fromDate);
+
+ const buildCopyTextForDay = (dStr: string, dayData: ParadeStateResponse | null): string => {
+   const flightLine = selectedFlight === 'Overall' ? '155 UASU BAF' : `${selectedFlight} Flt`;
+   const stateLabel = isPtDocument ? '*PT State*' : isOthersDocument ? `*${customDocumentHeader || 'Others State'}*` : '*Parade State*';
+   const onLabel = isPtDocument ? '*On PT*' : '*On Parade*';
+
+   const dateActiveAirmen = airmen.filter((a) => {
+     if (a.active === false) return false;
+     if (a.dateJoined && a.dateJoined > dStr) return false;
+     if (a.dateLeft && a.dateLeft < dStr) return false;
+     return selectedFlight === 'Overall' ? true : a.flightName === selectedFlight;
+   });
+
+   const raw = dayData?.personnelStatusList || [];
+   const pList = selectedFlight === 'Overall' ? raw : raw.filter((item) => item.airman.flightName === selectedFlight);
+
+   const onLines: string[] = [];
+   const disposalLines: string[] = [];
+
+   const formatNameOnly = (a: Airman) => `${formatRank(a.rank)} ${formatAirmanName(a.name)}`;
+
+   if (pList.length > 0) {
+     pList.forEach((item) => {
+       const { airman, dutyCode, statusCategory, idaShift, notes, dutyName, previousDutyCode, previousDutyName } = item;
+       const codeUpper = (dutyCode || '').toUpperCase();
+       const notesLower = (notes || '').toLowerCase();
+       const shiftLower = (idaShift || '').toLowerCase();
+
+       const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+       const isIdacNt = isIdac && (
+         shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+         notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+       );
+       const isPtIdacA = isPtDocument && isIdac && !isIdacNt && (
+         shiftLower === 'morning' || shiftLower === 'a' || !idaShift ||
+         notesLower.includes('morning') || notesLower.includes('idac a')
+       );
+
+       if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
+         disposalLines.push(`${formatNameOnly(airman)}- Leave`);
+       } else if (isPtDocument && isIdacNt) {
+         const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, dutyName);
+         disposalLines.push(`${formatNameOnly(airman)}- ${dutyDisplay}`);
+       } else if (statusCategory === 'PARADE' || codeUpper === 'ON_PARADE' || isPtIdacA || (!isPtDocument && isIdacNt && statusCategory !== 'OFF')) {
+         onLines.push(formatNameOnly(airman));
+       } else if (['TDY', 'ATT', 'DETT', 'ATTACHMENT', 'DETACHMENT'].includes(codeUpper) || statusCategory === 'TDY') {
+         disposalLines.push(`${formatNameOnly(airman)}- TDY`);
+       } else if (codeUpper === 'CANTEEN' || statusCategory === 'CANTEEN') {
+         disposalLines.push(`${formatNameOnly(airman)}- ${isPtDocument ? 'Reception Duty' : 'Canteen'}`);
+       } else if (['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE') {
+         disposalLines.push(`${formatNameOnly(airman)}- Bake & Bite`);
+       } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
+         disposalLines.push(`${formatNameOnly(airman)}- ESSN`);
+       } else if (['CMH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh')) {
+         disposalLines.push(`${formatNameOnly(airman)}- ${dutyName || dutyCode || 'CMH'}`);
+       } else if (['SICK_REPORT', 'SICK', 'EX_PPGF'].includes(codeUpper) || notesLower.includes('sick') || notesLower.includes('ppgf')) {
+         disposalLines.push(`${formatNameOnly(airman)}- ${dutyName || dutyCode || 'Sick Report'}`);
+       } else if (['CAT_C', 'DRILL'].includes(codeUpper) || notesLower.includes('drill')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Admin Order`);
+       } else if (codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Reception`);
+       } else if (['AIRPORT', 'AIR_FD', 'AIRFIELD'].includes(codeUpper) || notesLower.includes('air fd') || notesLower.includes('airfield')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Airfield`);
+       } else if (['ADMIN_ORDER', 'BOI', 'COMMITTEE'].includes(codeUpper) || notesLower.includes('admin order') || notesLower.includes('boi')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Admin Order`);
+       } else if (['CLASS_TRG', 'CLASS', 'TRG', 'LTTB'].includes(codeUpper) || notesLower.includes('class') || notesLower.includes('trg')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Class/Trg`);
+       } else if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper) || notesLower.includes('games') || notesLower.includes('g/h')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Guard of Honour`);
+       } else if (['ABSENT', 'AWL', 'OSL'].includes(codeUpper) || notesLower.includes('absent')) {
+         disposalLines.push(`${formatNameOnly(airman)}- Absent`);
+       } else if (codeUpper === 'DUTY_OFF' || statusCategory === 'OFF') {
+         let offName = formatDutyOffShortName(previousDutyCode, previousDutyName, dutyName || notes || (idaShift ? `IDAC ${idaShift}` : ''));
+         if (offName === 'Esct Off') offName = 'Escort Off';
+         disposalLines.push(`${formatNameOnly(airman)}- ${offName}`);
+       } else if ((['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'AIR_FD', 'ESCORT', 'ESC', 'ESCT'].includes(codeUpper) || codeUpper.startsWith('CUST_') || codeUpper.includes('1794394') || statusCategory === 'DUTY') && !['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT', ''].includes(codeUpper)) {
+         const shortDuty = formatDutyOnShortName(codeUpper, idaShift, notes, dutyName);
+         if (shortDuty === 'SY' || shortDuty === 'GD' || shortDuty === 'Sy Duty') {
+           disposalLines.push(`${formatNameOnly(airman)}- SY On`);
+         } else if (shortDuty === 'BTF' || shortDuty === 'NTF') {
+           disposalLines.push(`${formatNameOnly(airman)}- ${shortDuty} On`);
+         } else {
+           disposalLines.push(`${formatNameOnly(airman)}- ${shortDuty}`);
+         }
+       } else {
+         const customLabel = codeUpper === 'OTHERS' ? (notes || 'Other Disposal') : (dutyName || notes || dutyCode || 'Disposal');
+         disposalLines.push(`${formatNameOnly(airman)}- ${customLabel}`);
+       }
+     });
+   } else {
+     dateActiveAirmen.forEach((airman) => onLines.push(formatNameOnly(airman)));
+   }
+
+   const totalStrg = dateActiveAirmen.length > 0 ? dateActiveAirmen.length : pList.length;
+   const numberedOnLines = onLines.length > 0
+     ? onLines.map((line, idx) => `${idx + 1}. ${line}`)
+     : ['Nil'];
+   const numberedDisposalLines = disposalLines.map((line, idx) => `${idx + 1}. ${line}`);
+
+   const lines: string[] = [
+     'Assalamu alaikum sir/all;',
+     flightLine,
+     formatDateShort(dStr),
+     stateLabel,
+     `Total Strg : ${totalStrg}`,
+     '',
+     onLabel,
+     ...numberedOnLines,
+   ];
+
+   if (numberedDisposalLines.length > 0) {
+     lines.push('');
+     lines.push('*Disposal*');
+     lines.push(...numberedDisposalLines);
+   }
+
+   return lines.join('\n');
+ };
+
+ const handleCopyStateText = async () => {
+   const text = isMultiDay
+     ? datesInRange.map((dStr) => buildCopyTextForDay(dStr, multiDayStates[dStr] || null)).join('\n\n--------------------\n\n')
+     : buildCopyTextForDay(fromDate, singleParadeData);
+
+   try {
+     if (navigator.clipboard && window.isSecureContext) {
+       await navigator.clipboard.writeText(text);
+     } else {
+       const ta = document.createElement('textarea');
+       ta.value = text;
+       ta.style.position = 'fixed';
+       ta.style.opacity = '0';
+       document.body.appendChild(ta);
+       ta.select();
+       document.execCommand('copy');
+       document.body.removeChild(ta);
+     }
+     setCopiedText(true);
+     setTimeout(() => setCopiedText(false), 2500);
+   } catch (err) {
+     console.error('Copy text failed:', err);
+   }
+ };
+
  if (isOpen === false) return null;
   return createPortal(
     <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:static print:w-full print:h-auto print:z-[9999] print:overflow-visible print:block">
       {/* MODAL HEADER - HIDDEN ON PRINT */}
-      <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-2xl print:hidden z-10 gap-4 sticky top-0">
+      <div className="flex-none bg-slate-900 border-b border-slate-700 px-4 py-3 flex flex-col xl:flex-row items-start xl:items-center justify-between shadow-2xl print:hidden z-10 gap-3 sticky top-0">
         <div className="flex items-center space-x-4">
           <button
             onClick={onClose}
@@ -1080,13 +1236,137 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
             <p className="text-xs font-medium text-slate-400">Review document before printing</p>
           </div>
         </div>
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Date Presets: Today, 7 Days, 15 Days */}
+          {!isOthersDocument && (
+            <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 text-xs">
+              <button
+                type="button"
+                onClick={() => handleSetPreset('today')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  activePreset === 'today' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetPreset('7days')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  activePreset === '7days' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                7 Days
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetPreset('15days')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  activePreset === '15days' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                15 Days
+              </button>
+            </div>
+          )}
+
+          {/* Dt Picker with Weekday on LEFT */}
+          {dateMode === 'single' && !isMultiDay ? (
+            <div className="inline-flex items-center w-fit shrink-0 gap-1.5">
+              {singleWeekday && (
+                <span className="px-2 py-1 rounded-lg text-xs font-black border shrink-0 bg-slate-800 text-slate-200 border-slate-700">
+                  {singleWeekday}
+                </span>
+              )}
+              <div className="inline-flex items-center w-fit shrink-0 px-2.5 py-1 rounded-xl border text-xs font-bold gap-1 bg-slate-800 border-slate-700 text-white">
+                <span className="font-semibold mr-0.5 shrink-0 text-slate-400">Dt:</span>
+                <DateNavigator
+                  value={fromDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFromDate(val);
+                    setToDate(val);
+                    setSelectedDate(val);
+                    setActivePreset('custom');
+                  }}
+                  className="bg-transparent text-white font-black outline-none cursor-pointer"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="inline-flex items-center w-fit shrink-0 bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700 text-xs font-bold space-x-1.5 text-white">
+              <span className="text-slate-400 font-semibold">From:</span>
+              <DateNavigator
+                value={fromDate}
+                onChange={(e) => {
+                  const newFrom = e.target.value;
+                  if (activePreset === '7days' || activePreset === '15days') {
+                    const gap = activePreset === '7days' ? 6 : 14;
+                    const d = new Date(newFrom);
+                    d.setDate(d.getDate() + gap);
+                    setFromDate(newFrom);
+                    setToDate(d.toISOString().split('T')[0]);
+                  } else {
+                    setFromDate(newFrom);
+                    if (toDate < newFrom) setToDate(newFrom);
+                  }
+                }}
+                className="bg-transparent text-white font-black outline-none cursor-pointer"
+              />
+              <span className="text-slate-400 font-semibold">To:</span>
+              <DateNavigator
+                value={toDate}
+                min={fromDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setActivePreset('custom');
+                  setDateMode('multi');
+                }}
+                className="bg-transparent text-white font-black outline-none cursor-pointer"
+              />
+            </div>
+          )}
+
+          {/* Flt Filter */}
+          {!isOthersDocument && (
+            <div className="flex items-center space-x-1.5 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-bold">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-slate-400 font-semibold">Flt:</span>
+              <select
+                value={selectedFlight}
+                onChange={(e) => setSelectedFlight(e.target.value as any)}
+                className="bg-slate-800 text-white font-black outline-none cursor-pointer"
+              >
+                <option value="Overall">Overall</option>
+                <option value="Avionics">Avionics</option>
+                <option value="Mechanics">Mechanics</option>
+                <option value="GCS">GCS</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </div>
+          )}
+
+          {/* Copy Text Button */}
+          <button
+            type="button"
+            onClick={handleCopyStateText}
+            className={`flex items-center space-x-1.5 px-3 sm:px-4 py-2 rounded-xl font-black text-xs sm:text-sm shadow-lg transition-all cursor-pointer ${
+              copiedText
+                ? 'bg-emerald-500 text-white'
+                : 'bg-slate-700 hover:bg-slate-600 text-white border border-slate-600'
+            }`}
+            title="Copy State as Formatted Text"
+          >
+            {copiedText ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            <span>{copiedText ? 'Copied!' : 'Copy Text'}</span>
+          </button>
+
           <button
             onClick={onDownloadDocx || (() => exportHtmlToWord('print-parade-state-content', `${getPdfTitle()}.doc`, 'landscape'))}
-            className="flex items-center space-x-2 px-3 sm:px-6 py-2 sm:py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
+            className="flex items-center space-x-2 px-3 sm:px-5 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-xs sm:text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
             title="Export Document"
           >
-            <FileDown className="w-5 h-5" />
+            <FileDown className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>Export Doc</span>
           </button>
           <button
@@ -1094,9 +1374,9 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
               document.title = getPdfTitle();
               window.print();
             }}
-            className="flex items-center space-x-2 px-3 sm:px-6 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
+            className="flex items-center space-x-2 px-3 sm:px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs sm:text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
           >
-            <Printer className="w-5 h-5" />
+            <Printer className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>Official Export / Print</span>
           </button>
         </div>
@@ -1394,7 +1674,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  155 UASU BAF {selectedFlight !== 'Overall' ? `(${selectedFlight.toUpperCase()} FLT)` : ''}
  </h2>
  </div>
- <div className="text-right font-normal text-slate-900 dark:text-white pr-1 text-xs mt-1">
+ <div className="text-right font-normal pr-1 text-xs mt-1 text-slate-900 dark:text-white">
  Date: {formatDateShort(fromDate)}
  </div>
  </div>
@@ -1746,7 +2026,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
 
  {/* Add Disposal Modal */}
  {showAddDisposalModal && (
- <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
+ <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:pt-8 overflow-y-auto bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-700 shadow-2xl max-w-xl w-full p-6 space-y-5 relative overflow-hidden">
  {/* Modal Header */}
  <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 dark:border-slate-700 pb-4">
@@ -1966,7 +2246,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  return { isOnParade: false, label: 'Absent', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
  }
  if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF') {
- return { isOnParade: false, label: dutyName || notes || 'GD Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'GD Off' };
+ return { isOnParade: false, label: dutyName || notes || 'SY Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'SY Off' };
  }
  if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
  return { isOnParade: false, label: notes || dutyCode || 'On Duty', dutyCode: dutyCode || 'DUTY_ON', notes, dutyName: dutyName || 'On Duty' };
@@ -2155,7 +2435,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
 
  {/* Edit / Change Disposal Modal */}
  {editDisposalModal && (
- <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn print:hidden">
+ <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:pt-8 overflow-y-auto bg-slate-900/60 backdrop-blur-xs animate-fadeIn print:hidden">
  <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 dark:border-slate-700 space-y-4">
  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 dark:border-slate-700 pb-3">
  <div>

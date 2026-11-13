@@ -147,7 +147,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
         // Auto-migrate old "GD/TF/Airfield Duty" category out of saved disposals
         if (parsed.some((d: any) => d.label === 'GD/TF/Airfield Duty' || d.code === 'DUTY_OFF' || d.code === 'CANTEEN' || d.code === 'RECEPTION' || d.label === 'ED/ EX PPGF' || d.label === 'CMH/ BNS/ BSH/Qnt' || d.label === 'U/C, U/Board' || d.label === 'Aft/ Ni flg/ Ni Duty' || d.label === 'AWOL/Detention' || d.label === 'Class/Exam')) {
           parsed = parsed.filter((d: any) => !['GD/TF/Airfield Duty', 'DUTY_OFF', 'CANTEEN', 'RECEPTION', 'ED/ EX PPGF', 'CMH/ BNS/ BSH/Qnt', 'U/C, U/Board', 'Aft/ Ni flg/ Ni Duty', 'AWOL/Detention', 'Class/Exam', 'Games / Guard of Honor'].includes(d.label) && !['DUTY_OFF', 'CANTEEN', 'RECEPTION'].includes(d.code));
-          if (!parsed.some((d: any) => d.code === 'GD')) parsed.push({code: 'GD', label: 'Base Security (GD)'});
+          if (!parsed.some((d: any) => d.code === 'GD')) parsed.push({code: 'GD', label: 'Base Security (SY)'});
           if (!parsed.some((d: any) => d.code === 'AIRPORT')) parsed.push({code: 'AIRPORT', label: 'Airfield Duty'});
           localStorage.setItem('savedDisposalKeys_NC', JSON.stringify(parsed));
         }
@@ -197,7 +197,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
     { code: "OTHERS", customTitle: "Aft Flg", label: "Aft Flg" },
     { code: "OTHERS", customTitle: "Ni Flg", label: "Ni Flg" },
     { code: "OTHERS", customTitle: "Ni Duty", label: "Ni Duty" },
-    { code: "GD", label: "Base Security (GD)" },
+    { code: "GD", label: "Base Security (SY)" },
     { code: "BTF", label: "Base Taskforce (BTF)" },
     { code: "AIRPORT", label: "Airfield Duty" },
     { code: "OTHERS", customTitle: "Driving", label: "Driving" },
@@ -2069,9 +2069,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                 if (['ABSENT', 'AWL'].includes(codeUpper)) {
                   return { isOnParade: false, label: codeUpper === 'AWL' ? 'AWOL' : 'Detention', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
                 }
-                if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
+                if (statusCategory === 'DUTY' || ['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
                   const displayDuty = formatDutyOnShortName(codeUpper, st.idaShift, notes, dutyName);
-                  return { isOnParade: false, label: displayDuty || 'Base Security (GD)', dutyCode: dutyCode || 'GD', notes, dutyName: dutyName || 'Duty' };
+                  return { isOnParade: false, label: displayDuty || 'Base Security (SY)', dutyCode: dutyCode || 'GD', notes, dutyName: dutyName || 'Duty' };
                 }
 
                 return { isOnParade: false, label: notes || dutyName || dutyCode || 'Disposal', dutyCode: dutyCode || 'OTHERS', notes, dutyName: dutyName || 'Disposal' };
@@ -2267,7 +2267,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     type="text"
                     value={editDisposalFilterText}
                     onChange={(e) => setEditDisposalFilterText(e.target.value)}
-                    placeholder="Search disposal (e.g. Leave, CMH, GD, BTF)..."
+                    placeholder="Search disposal (e.g. Leave, CMH, SY, BTF)..."
                     className="w-full pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:border-emerald-500 shadow-2xs"
                   />
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -2286,7 +2286,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                 {(() => {
                   const ALL_DISPOSALS_VERTICAL = [
                     { code: 'ON_PARADE', label: 'On Parade (Clear Disposal)', isClear: true, color: 'emerald' },
-                    { code: 'GD', label: 'Base Security (GD)', color: 'amber' },
+                    { code: 'GD', label: 'Base Security (SY)', color: 'amber' },
                     { code: 'AIRPORT', label: 'Airfield Duty', color: 'amber' },
                     { code: 'BTF', label: 'Base Taskforce (BTF)', color: 'amber' },
                     { code: 'NTF', label: 'Night Taskforce (NTF)', color: 'amber' },

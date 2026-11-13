@@ -12,7 +12,9 @@ import {
   increment,
 } from 'firebase/firestore';
 import {
+  auth,
   db,
+  firebaseConfig,
   isFirebaseConfigured,
   isFirestoreQuotaExceeded,
   isQuotaExceededError,
@@ -166,10 +168,22 @@ export function decodeNativeValueToString(val: any): string {
   return JSON.stringify(val);
 }
 
+export function isCorruptedAssignmentRecord(a: any): boolean {
+  if (!a || typeof a !== 'object') return true;
+  const idStr = String(a.id || '').trim();
+  const airId = String(a.airmanId || '').trim();
+  if (idStr === 'test' || airId === 'test') return true;
+  const match = idStr.match(/^asn_.*?_(\d{4}-\d{2}-\d{2})_/);
+  if (match && a.date && match[1] !== String(a.date).trim()) {
+    return true;
+  }
+  return false;
+}
+
 export function getAssignmentDocId(a: any): string {
   const raw =
     a?.id ||
-    `asn_${a?.airmanId || 'u'}_${a?.date || '0000'}_${a?.dutyCode || 'GD'}_${a?.idaShift || 'n'}_${a?.disposalScope || 'ALL'}`;
+    `asn_${a?.airmanId || 'u'}_${a?.date || '0000'}_${a?.dutyCode || 'ON_PARADE'}_${a?.idaShift || 'n'}_${a?.disposalScope || 'ALL'}`;
   return sanitizeDocId(raw);
 }
 
@@ -344,7 +358,7 @@ export async function probeFirebaseConnectionAndQuota(forceServerCheck = false):
     return { ok: false, quotaExceeded: true, errorMsg: 'Firestore daily quota exceeded' };
   }
   try {
-    await withFirestoreTimeout(getDocFromServer(doc(db, 'test', 'connection')), 8000, 'probe:connection');
+    await withFirestoreTimeout(getDocFromServer(doc(db, 'test', 'connection')), 6000, 'probe:connection');
     if (isFirestoreQuotaExceeded()) {
       setFirestoreQuotaExceeded(false);
     }
@@ -355,6 +369,20 @@ export async function probeFirebaseConnectionAndQuota(forceServerCheck = false):
       setFirestoreQuotaExceeded(true, msg);
       return { ok: false, quotaExceeded: true, errorMsg: msg };
     }
+    // Fallback to quick REST health check if SDK WebChannel/long-polling stalled
+    try {
+      const restOk = await probeFirestoreRestHealth(5000);
+      if (restOk.ok) {
+        if (isFirestoreQuotaExceeded()) {
+          setFirestoreQuotaExceeded(false);
+        }
+        return { ok: true, quotaExceeded: false };
+      }
+      if (restOk.quotaExceeded) {
+        setFirestoreQuotaExceeded(true, restOk.errorMsg || msg);
+        return { ok: false, quotaExceeded: true, errorMsg: restOk.errorMsg || msg };
+      }
+    } catch {}
     return { ok: false, quotaExceeded: false, errorMsg: msg };
   }
 }
@@ -364,15 +392,207 @@ export async function checkFirebaseHealth(): Promise<boolean> {
   return res.ok;
 }
 
-// -------------------- Chunked Batch Helper --------------------
+// -------------------- Chunked Batch & Resilient Query Helpers --------------------
 
 function withFirestoreTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Firestore ${label} timeout after ${ms}ms`)), ms)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Firestore ${label} timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
+function isPermissionDeniedError(err: unknown): boolean {
+  if (!err) return false;
+  const code = String((err as any)?.code || '').toLowerCase();
+  const msg = String((err as any)?.message || err || '').toLowerCase();
+  return (
+    code.includes('permission-denied') ||
+    msg.includes('missing or insufficient permissions') ||
+    msg.includes('permission_denied') ||
+    msg.includes('permission denied')
+  );
+}
+
+function decodeFirestoreRestValue(val: any): any {
+  if (!val || typeof val !== 'object') return undefined;
+  if ('nullValue' in val) return null;
+  if ('booleanValue' in val) return Boolean(val.booleanValue);
+  if ('integerValue' in val) {
+    const n = Number(val.integerValue);
+    return Number.isNaN(n) ? val.integerValue : n;
+  }
+  if ('doubleValue' in val) {
+    const n = Number(val.doubleValue);
+    return Number.isNaN(n) ? val.doubleValue : n;
+  }
+  if ('stringValue' in val) return String(val.stringValue);
+  if ('timestampValue' in val) return String(val.timestampValue);
+  if ('bytesValue' in val) return String(val.bytesValue);
+  if ('referenceValue' in val) return String(val.referenceValue);
+  if ('geoPointValue' in val) return val.geoPointValue;
+  if ('arrayValue' in val) {
+    const values = val.arrayValue?.values;
+    return Array.isArray(values) ? values.map((v: any) => decodeFirestoreRestValue(v)) : [];
+  }
+  if ('mapValue' in val) {
+    return decodeFirestoreRestFields(val.mapValue?.fields);
+  }
+  return undefined;
+}
+
+function decodeFirestoreRestFields(fields?: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  if (!fields || typeof fields !== 'object') return out;
+  for (const [key, rawVal] of Object.entries(fields)) {
+    const decoded = decodeFirestoreRestValue(rawVal);
+    if (decoded !== undefined) {
+      out[key] = decoded;
+    }
+  }
+  return out;
+}
+
+async function getOptionalAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    if (auth?.currentUser) {
+      const token = await auth.currentUser.getIdToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+  } catch {}
+  return headers;
+}
+
+async function probeFirestoreRestHealth(timeoutMs = 5000): Promise<{
+  ok: boolean;
+  quotaExceeded: boolean;
+  errorMsg?: string;
+}> {
+  if (!isFirebaseConfigured || typeof fetch !== 'function') {
+    return { ok: false, quotaExceeded: false };
+  }
+  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    firebaseConfig.projectId
+  )}/databases/${encodeURIComponent(
+    firebaseConfig.firestoreDatabaseId
+  )}/documents/system_meta/sync_manifest?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers = await getOptionalAuthHeaders();
+    const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    if (res.ok || res.status === 404) {
+      return { ok: true, quotaExceeded: false };
+    }
+    const text = await res.text().catch(() => '');
+    if (res.status === 429 || text.toLowerCase().includes('resource_exhausted') || text.toLowerCase().includes('quota')) {
+      return { ok: false, quotaExceeded: true, errorMsg: text || `HTTP ${res.status}` };
+    }
+    return { ok: false, quotaExceeded: false, errorMsg: text || `HTTP ${res.status}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runQueryRestFallback(
+  collectionId: string,
+  sinceIso?: string,
+  timeoutMs = 15000
+): Promise<any[]> {
+  if (!isFirebaseConfigured || typeof fetch !== 'function') {
+    throw new Error(`Firestore REST fallback unavailable for ${collectionId}`);
+  }
+  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    firebaseConfig.projectId
+  )}/databases/${encodeURIComponent(
+    firebaseConfig.firestoreDatabaseId
+  )}/documents:runQuery?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+
+  const structuredQuery: Record<string, any> = {
+    from: [{ collectionId }],
+  };
+  if (sinceIso) {
+    structuredQuery.where = {
+      fieldFilter: {
+        field: { fieldPath: 'updatedAt' },
+        op: 'GREATER_THAN',
+        value: { stringValue: sinceIso },
+      },
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers = await getOptionalAuthHeaders();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ structuredQuery }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => `HTTP ${res.status}`);
+      if (res.status === 429 || isQuotaExceededError(errText)) {
+        setFirestoreQuotaExceeded(true, errText);
+        throw new Error(errText);
+      }
+      if (res.status === 403 || isPermissionDeniedError(errText)) {
+        handleFirestoreError(new Error('Missing or insufficient permissions'), OperationType.LIST, collectionId);
+      }
+      throw new Error(`Firestore REST list:${collectionId} failed (${res.status}): ${errText.slice(0, 200)}`);
+    }
+
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return [];
+    const list: any[] = [];
+    for (const row of rows) {
+      if (row && row.document && row.document.fields) {
+        list.push(decodeFirestoreRestFields(row.document.fields));
+      }
+    }
+    return list;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Firestore REST list:${collectionId} timeout after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function queryCollectionDocs(
+  collectionId: string,
+  sinceIso?: string,
+  sdkTimeoutMs = 10000,
+  restTimeoutMs = 15000
+): Promise<any[]> {
+  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
+  try {
+    const colRef = collection(db, collectionId);
+    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
+    const snap = await withFirestoreTimeout(getDocs(q), sdkTimeoutMs, `list:${collectionId}`);
+    const list: any[] = [];
+    snap.forEach((docSnap) => {
+      list.push(docSnap.data());
+    });
+    return list;
+  } catch (err: any) {
+    if (isQuotaExceededError(err)) {
+      setFirestoreQuotaExceeded(true, err?.message);
+      throw err;
+    }
+    if (isPermissionDeniedError(err)) {
+      handleFirestoreError(err, OperationType.LIST, collectionId);
+    }
+    console.warn(`[FirebaseService] SDK list:${collectionId} fell back to REST (${err?.message || err})`);
+    return runQueryRestFallback(collectionId, sinceIso, restTimeoutMs);
+  }
 }
 
 async function commitSetOps(
@@ -455,7 +675,7 @@ export async function fetchSyncManifestFromFirebase(): Promise<SyncManifest | nu
   try {
     const snap = await withFirestoreTimeout(
       getDoc(doc(db, 'system_meta', 'sync_manifest')),
-      8000,
+      6000,
       'get:sync_manifest'
     );
     if (!snap.exists()) return null;
@@ -463,6 +683,29 @@ export async function fetchSyncManifestFromFirebase(): Promise<SyncManifest | nu
   } catch (err: any) {
     if (isQuotaExceededError(err)) {
       setFirestoreQuotaExceeded(true, err?.message);
+      return null;
+    }
+    // REST fallback for sync_manifest if SDK read timed out
+    if (typeof fetch === 'function') {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+          firebaseConfig.projectId
+        )}/databases/${encodeURIComponent(
+          firebaseConfig.firestoreDatabaseId
+        )}/documents/system_meta/sync_manifest?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+        const headers = await getOptionalAuthHeaders();
+        const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+        if (res.ok) {
+          const docJson = await res.json();
+          if (docJson?.fields) {
+            return decodeFirestoreRestFields(docJson.fields) as SyncManifest;
+          }
+        }
+      } catch {} finally {
+        clearTimeout(timer);
+      }
     }
     return null;
   }
@@ -604,23 +847,7 @@ export async function pushAirmenToFirebase(airmen: any[]): Promise<number> {
 }
 
 export async function fetchAirmenFromFirebase(sinceIso?: string): Promise<any[]> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
-  try {
-    const colRef = collection(db, 'airmen');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:airmen');
-    const list: any[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data());
-    });
-    return list;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
-    }
-    handleFirestoreError(err, OperationType.LIST, 'airmen');
-  }
+  return queryCollectionDocs('airmen', sinceIso, 10000, 12000);
 }
 
 // -------------------- 2. DUTY ASSIGNMENTS --------------------
@@ -634,7 +861,7 @@ function formatDutyAssignmentForFirestore(
   const updatedAt = toIsoString(forceDelete ? nowIso : a?.updatedAt || nowIso);
   const rawDate = String(a?.date || nowIso.slice(0, 10)).trim();
   const safeDate = rawDate.length >= 4 ? (rawDate.length > 32 ? rawDate.slice(0, 32) : rawDate) : nowIso.slice(0, 10);
-  const rawCode = String(a?.dutyCode || 'GD').trim() || 'GD';
+  const rawCode = String(a?.dutyCode || 'ON_PARADE').trim() || 'ON_PARADE';
   const safeCode = rawCode.length > 64 ? rawCode.slice(0, 64) : rawCode;
   const payload: Record<string, any> = {
     id: clampStr(docId, 128) || docId,
@@ -690,23 +917,8 @@ export async function softDeleteDutyAssignmentsInFirebase(assignments: any[]): P
 }
 
 export async function fetchDutyAssignmentsFromFirebase(sinceIso?: string): Promise<any[]> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
-  try {
-    const colRef = collection(db, 'duty_assignments');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:duty_assignments');
-    const list: any[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data());
-    });
-    return list;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
-    }
-    handleFirestoreError(err, OperationType.LIST, 'duty_assignments');
-  }
+  const docs = await queryCollectionDocs('duty_assignments', sinceIso, 20000, 25000);
+  return docs.map((d) => (isCorruptedAssignmentRecord(d) ? { ...d, isDeleted: true } : d));
 }
 
 // -------------------- 3. PARADE STATES / ACTIVITY HISTORY --------------------
@@ -754,23 +966,7 @@ export async function pushParadeStatesToFirebase(states: any[]): Promise<number>
 }
 
 export async function fetchParadeStatesFromFirebase(sinceIso?: string): Promise<any[]> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
-  try {
-    const colRef = collection(db, 'parade_states');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:parade_states');
-    const list: any[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data());
-    });
-    return list;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
-    }
-    handleFirestoreError(err, OperationType.LIST, 'parade_states');
-  }
+  return queryCollectionDocs('parade_states', sinceIso, 10000, 12000);
 }
 
 // -------------------- 4. USER PROFILES --------------------
@@ -823,24 +1019,8 @@ export async function pushUserProfilesToFirebase(users: any[]): Promise<number> 
   return commitSetOps(ops, 'user_profiles');
 }
 
-export async function fetchUserProfilesFromFirebase(sinceIso?: string): Promise<any[]> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
-  try {
-    const colRef = collection(db, 'user_profiles');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:user_profiles');
-    const list: any[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data());
-    });
-    return list;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
-    }
-    handleFirestoreError(err, OperationType.LIST, 'user_profiles');
-  }
+export async function fetchUserProfilesFromFirebase(sinceIso?: string, timeoutMs = 10000): Promise<any[]> {
+  return queryCollectionDocs('user_profiles', sinceIso, timeoutMs, Math.max(timeoutMs, 10000));
 }
 
 // -------------------- 5. APP SETTINGS --------------------
@@ -878,31 +1058,19 @@ export async function pushAppSettingsToFirebase(settings: AppSettingItemInput[])
 export async function fetchAppSettingsWithMetaFromFirebase(
   sinceIso?: string
 ): Promise<Record<string, { valueStr: string; rawValue: any; updatedAt: string; updatedBy?: string }>> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return {};
-  try {
-    const colRef = collection(db, 'app_settings');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:app_settings');
-    const result: Record<string, { valueStr: string; rawValue: any; updatedAt: string; updatedBy?: string }> = {};
-    snap.forEach((docSnap) => {
-      const d = docSnap.data() as any;
-      if (d && d.settingKey) {
-        result[d.settingKey] = {
-          valueStr: decodeNativeValueToString(d.value),
-          rawValue: d.value,
-          updatedAt: String(d.updatedAt || ''),
-          updatedBy: d.updatedBy,
-        };
-      }
-    });
-    return result;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
+  const docs = await queryCollectionDocs('app_settings', sinceIso, 10000, 12000);
+  const result: Record<string, { valueStr: string; rawValue: any; updatedAt: string; updatedBy?: string }> = {};
+  docs.forEach((d: any) => {
+    if (d && d.settingKey) {
+      result[d.settingKey] = {
+        valueStr: decodeNativeValueToString(d.value),
+        rawValue: d.value,
+        updatedAt: String(d.updatedAt || ''),
+        updatedBy: d.updatedBy,
+      };
     }
-    handleFirestoreError(err, OperationType.LIST, 'app_settings');
-  }
+  });
+  return result;
 }
 
 export async function fetchAppSettingsFromFirebase(sinceIso?: string): Promise<Record<string, string>> {
@@ -1002,24 +1170,9 @@ export async function pushCanteenMembersToFirebase(members: any[]): Promise<numb
   return commitSetOps(ops, 'canteen_members');
 }
 
-export async function fetchCanteenMembersFromFirebase(sinceIso?: string): Promise<any[]> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
-  try {
-    const colRef = collection(db, 'canteen_members');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:canteen_members');
-    const list: any[] = [];
-    snap.forEach((docSnap) => {
-      list.push(hydrateCanteenMemberFromFirestore(docSnap.data()));
-    });
-    return list;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
-    }
-    handleFirestoreError(err, OperationType.LIST, 'canteen_members');
-  }
+export async function fetchCanteenMembersFromFirebase(sinceIso?: string, timeoutMs = 10000): Promise<any[]> {
+  const docs = await queryCollectionDocs('canteen_members', sinceIso, timeoutMs, Math.max(timeoutMs, 10000));
+  return docs.map((d) => hydrateCanteenMemberFromFirestore(d));
 }
 
 // -------------------- 7. CANTEEN DATA --------------------
@@ -1062,31 +1215,19 @@ export async function pushCanteenDataKeyToFirebase(
 export async function fetchCanteenDataFromFirebase(
   sinceIso?: string
 ): Promise<Array<{ docKey: string; value: any; updatedAt: string; updatedBy?: string }>> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return [];
-  try {
-    const colRef = collection(db, 'canteen_data');
-    const q = sinceIso ? query(colRef, where('updatedAt', '>', sinceIso)) : colRef;
-    const snap = await withFirestoreTimeout(getDocs(q), 20000, 'list:canteen_data');
-    const list: Array<{ docKey: string; value: any; updatedAt: string; updatedBy?: string }> = [];
-    snap.forEach((docSnap) => {
-      const d = docSnap.data() as any;
-      if (d && d.docKey) {
-        list.push({
-          docKey: String(d.docKey),
-          value: d.value,
-          updatedAt: String(d.updatedAt || ''),
-          updatedBy: d.updatedBy,
-        });
-      }
-    });
-    return list;
-  } catch (err) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true, (err as any)?.message);
-      throw err;
+  const docs = await queryCollectionDocs('canteen_data', sinceIso, 12000, 15000);
+  const list: Array<{ docKey: string; value: any; updatedAt: string; updatedBy?: string }> = [];
+  docs.forEach((d: any) => {
+    if (d && d.docKey) {
+      list.push({
+        docKey: String(d.docKey),
+        value: d.value,
+        updatedAt: String(d.updatedAt || ''),
+        updatedBy: d.updatedBy,
+      });
     }
-    handleFirestoreError(err, OperationType.LIST, 'canteen_data');
-  }
+  });
+  return list;
 }
 
 export async function fetchSingleCanteenDocFromFirebase(docKey: string): Promise<any | null> {

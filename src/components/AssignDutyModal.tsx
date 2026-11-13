@@ -43,6 +43,7 @@ import { AssignLeaveTab } from './AssignLeaveTab';
 import { AssignTdyTab } from './AssignTdyTab';
 import { AssignDeploymentTab } from './AssignDeploymentTab';
 import { localDb } from '../services/localDatabase';
+import { isHolidayDate, getWeekdayShort } from '../utils/holidayUtils';
 
 export const isSameAirman = (id1?: string, id2?: string): boolean => {
   if (!id1 || !id2) return false;
@@ -1253,10 +1254,10 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       const airport = airmanAssignments.find((a) => a.dutyCode === 'AIRPORT' || a.dutyCode === 'ATT' || (a.dutyName && a.dutyName.toUpperCase().includes('AIRPORT')) || (a.dutyName && a.dutyName.toUpperCase().includes('AIRFIELD')));
       if (airport) return { label: 'Airport', type: 'AIRPORT', isFixed: false };
 
-      // Base Security Duty (GD) - ONLY if dutyCode is actually GD or dutyName mentions Security
-      const gd = airmanAssignments.find((a) => a.dutyCode === 'GD' || (a.dutyName && (a.dutyName.toUpperCase().includes('SECURITY') || a.dutyName.toUpperCase().includes('GD'))));
+      // Base Security Duty (SY) - ONLY if dutyCode is actually GD/SY or dutyName mentions Security
+      const gd = airmanAssignments.find((a) => a.dutyCode === 'GD' || (a.dutyCode as any) === 'SY' || (a.dutyName && (a.dutyName.toUpperCase().includes('SECURITY') || /\b(GD|SY)\b/.test(a.dutyName.toUpperCase()))));
       if (gd) {
-        return { label: 'Security (GD)', type: 'GD', isFixed: false };
+        return { label: 'Security (SY)', type: 'GD', isFixed: false };
       }
 
       const bnb = airmanAssignments.find((a) => a.dutyCode === 'BAKE_N_BITE');
@@ -1303,7 +1304,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
               (yestAss.notes || '').toLowerCase().includes('escort');
           })();
           if (isHeavy) {
-            let offShort = 'GD Off';
+            let offShort = 'SY Off';
             if (
               yestAss.dutyCode === 'ESCORT' ||
               yestAss.dutyCode === 'ESC' ||
@@ -1312,7 +1313,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
               (yestAss.dutyName || '').toLowerCase().includes('escort') ||
               (yestAss.notes || '').toLowerCase().includes('escort')
             ) offShort = 'Esct Off';
-            else if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+            else if (yestAss.dutyCode === 'GD' || (yestAss.dutyCode as any) === 'SY') offShort = 'SY Off';
             else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
             else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
             else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airport Off';
@@ -1332,7 +1333,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       if (firstDuty.dutyCode === 'DUTY_OFF') {
         if (prevAssignments.length > 0) {
           const yestAss = prevAssignments[0];
-          let offShort = 'GD Off';
+          let offShort = 'SY Off';
           if (
             yestAss.dutyCode === 'ESCORT' ||
             yestAss.dutyCode === 'ESC' ||
@@ -1341,20 +1342,20 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             (yestAss.dutyName || '').toLowerCase().includes('escort') ||
             (yestAss.notes || '').toLowerCase().includes('escort')
           ) offShort = 'Esct Off';
-          else if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+          else if (yestAss.dutyCode === 'GD' || (yestAss.dutyCode as any) === 'SY') offShort = 'SY Off';
           else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
           else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
           else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airport Off';
           else if ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
           else if (yestAss.notes?.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
           else if (firstDuty.previousDutyName?.toLowerCase().includes('escort') || firstDuty.notes?.toLowerCase().includes('escort')) offShort = 'Esct Off';
-          else offShort = 'GD Off';
+          else offShort = 'SY Off';
           
           name = offShort;
         } else {
           name = (firstDuty.previousDutyName?.toLowerCase().includes('escort') || firstDuty.notes?.toLowerCase().includes('escort'))
             ? 'Esct Off'
-            : (firstDuty.previousDutyName || firstDuty.notes || 'GD Off');
+            : (firstDuty.previousDutyName || firstDuty.notes || 'SY Off');
         }
       }
 
@@ -1395,7 +1396,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       })();
         
       if (isHeavy) {
-        let offShort = 'GD Off';
+        let offShort = 'SY Off';
         if (
           yestAss.dutyCode === 'ESCORT' ||
           yestAss.dutyCode === 'ESC' ||
@@ -1404,7 +1405,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           (yestAss.dutyName || '').toLowerCase().includes('escort') ||
           (yestAss.notes || '').toLowerCase().includes('escort')
         ) offShort = 'Esct Off';
-        else if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+        else if (yestAss.dutyCode === 'GD' || (yestAss.dutyCode as any) === 'SY') offShort = 'SY Off';
         else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
         else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
         else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airport Off';
@@ -1526,9 +1527,13 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       });
   }, [airmen, activeFlight, proxyForFlight, isProxyEnabled, activeDutyCode, activeIdaShift, searchQuery, assignmentsList, prevDayAssignmentsList]);
 
+  const activeDateStr = fromDate || selectedDate;
+  const isHoliday = isHolidayDate(activeDateStr);
+  const weekdayShort = getWeekdayShort(activeDateStr);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-5 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
-      <div className="bg-white dark:bg-slate-900 rounded-none sm:rounded-2xl border-0 sm:border border-slate-200 dark:border-slate-800 shadow-2xl max-w-4xl w-full p-4 sm:p-5 space-y-3.5 relative overflow-hidden h-full sm:h-auto sm:max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-0 sm:pt-6 sm:pb-6 sm:px-5 overflow-y-auto bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
+      <div className="bg-white dark:bg-slate-900 rounded-none sm:rounded-2xl border-0 sm:border border-slate-200 dark:border-slate-800 shadow-2xl max-w-4xl w-full p-4 sm:p-5 space-y-3.5 relative overflow-hidden h-full sm:h-auto sm:max-h-[calc(100vh-3rem)] flex flex-col">
         
         {/* Modal Header */}
         <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
@@ -1623,7 +1628,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         <div className="flex-1 overflow-y-auto space-y-3.5 pr-1">
           
           {/* 1. Date Selection Bar */}
-          <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="p-2.5 rounded-xl border bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5 transition-colors">
             <div className="flex items-center space-x-2">
               <Calendar className="w-4 h-4 text-emerald-600" />
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -1665,6 +1670,13 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             </div>
 
             <div className="flex items-center space-x-2">
+              {weekdayShort && (
+                <span
+                  className="px-2 py-1 text-[11px] font-black rounded-md border shrink-0 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600"
+                >
+                  {weekdayShort}
+                </span>
+              )}
               <button
                   type="button"
                   onClick={() => handleShiftDate(-1)}
@@ -1697,7 +1709,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                     }
                   }
                 }}
-                className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500 cursor-pointer"
+                className="px-2.5 py-1 text-xs font-bold rounded-lg border outline-none cursor-pointer border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:border-emerald-500"
               />
               <button
                   type="button"
@@ -1734,6 +1746,11 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                   <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     1. Choose Duty:
                   </span>
+                  {isHoliday && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-xs">
+                      Off Day / Holiday
+                    </span>
+                  )}
 
                   {/* Duty Lock Toggle Button */}
                   <button
@@ -2046,7 +2063,9 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                           </span>
                           <span
                             className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                              isShiftSelected ? 'bg-white text-teal-900' : 'bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200'
+                              isShiftSelected
+                                ? 'bg-white text-teal-900'
+                                : 'bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200'
                             }`}
                           >
                             {shiftAssigned.length}{shiftQuota > 0 ? `/${shiftQuota}` : ''}
@@ -2308,7 +2327,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                   } else if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
                     // User requirement: For IDAC Duty, all personnel in the flight are visible and eligible, even if on other disposal
                     isEligible = true;
-                  } else if (statusInfo.type === 'ON_PARADE' || statusInfo.type === 'NIGHT_OFF' || statusInfo.type === 'DUTY_OFF' || statusInfo.type === 'GD Off' || statusInfo.type === 'CANTEEN' || (statusInfo.label || '').toLowerCase().includes('canteen') || (statusInfo.type === 'DEPLOYMENT' && (statusInfo.label || '').toLowerCase().includes('canteen'))) {
+                  } else if (statusInfo.type === 'ON_PARADE' || statusInfo.type === 'NIGHT_OFF' || statusInfo.type === 'DUTY_OFF' || statusInfo.type === 'GD Off' || statusInfo.type === 'SY Off' || statusInfo.type === 'CANTEEN' || (statusInfo.label || '').toLowerCase().includes('canteen') || (statusInfo.type === 'DEPLOYMENT' && (statusInfo.label || '').toLowerCase().includes('canteen'))) {
                     // On Parade, Duty Off, or Canteen are always eligible
                     isEligible = true;
                   }

@@ -2,14 +2,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
-import Tesseract from 'tesseract.js';
-import mammoth from 'mammoth';
 import path from 'path';
 import fs from 'fs';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
-import pdfParsePkg from 'pdf-parse/lib/pdf-parse.js';
+import type { GoogleGenAI } from '@google/genai';
 
 process.on('uncaughtException', (err: any) => {
   const msg = String(err?.message || err || '');
@@ -194,8 +190,26 @@ function normalizeFlightName(flight: string): FlightName {
   return 'Admin';
 }
 
+function isCorruptedAssignmentRecord(a: any): boolean {
+  if (!a || typeof a !== 'object') return true;
+  const idStr = String(a.id || '').trim();
+  const airId = String(a.airmanId || '').trim();
+  if (idStr === 'test' || airId === 'test') return true;
+  const match = idStr.match(/^asn_.*?_(\d{4}-\d{2}-\d{2})_/);
+  if (match && a.date && match[1] !== String(a.date).trim()) {
+    return true;
+  }
+  return false;
+}
+
+let cachedDb: LocalDB | null = null;
+
 // Ensure data file exists or seed it
 function loadDatabase(): LocalDB {
+  if (cachedDb) {
+    return cachedDb;
+  }
+
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
@@ -205,6 +219,7 @@ function loadDatabase(): LocalDB {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.airmen)) {
+        let needsSave = false;
         // Preserve existing user modifications and custom airmen
         const existingMap = new Map<string, Airman>();
         parsed.airmen.forEach((a: Airman) => {
@@ -226,6 +241,7 @@ function loadDatabase(): LocalDB {
             });
           } else {
             finalAirmen.push(initA);
+            needsSave = true;
           }
         });
 
@@ -239,34 +255,49 @@ function loadDatabase(): LocalDB {
         parsed.airmen = finalAirmen.sort((a, b) => (a.serNo || 999) - (b.serNo || 999));
         if (!parsed.assignments || typeof parsed.assignments !== 'object') {
           parsed.assignments = {};
+          needsSave = true;
         }
         if (!parsed.activityHistory || !Array.isArray(parsed.activityHistory)) {
           parsed.activityHistory = [];
+          needsSave = true;
         }
         if (!parsed.adminPasscode) {
           parsed.adminPasscode = '1124';
+          needsSave = true;
         }
         if (!parsed.importHistory || !Array.isArray(parsed.importHistory)) {
           parsed.importHistory = [];
+          needsSave = true;
         }
         if (!parsed.assignments['2026-07'] || parsed.assignments['2026-07'].length < 50) {
           parsed.assignments['2026-07'] = generateOfficialMonthAssignments(2026, 7);
+          needsSave = true;
         }
         if (!parsed.assignments['2026-08'] || parsed.assignments['2026-08'].length < 50) {
           parsed.assignments['2026-08'] = generateOfficialMonthAssignments(2026, 8);
+          needsSave = true;
         }
-        // Clean any placeholder notes in assignments
+        // Clean corrupted records and any placeholder notes in assignments
         Object.keys(parsed.assignments || {}).forEach((k) => {
           if (Array.isArray(parsed.assignments[k])) {
+            const beforeLen = parsed.assignments[k].length;
+            parsed.assignments[k] = parsed.assignments[k].filter((a: any) => !isCorruptedAssignmentRecord(a));
+            if (parsed.assignments[k].length !== beforeLen) {
+              needsSave = true;
+            }
             parsed.assignments[k].forEach((a: any) => {
               if (a.notes && typeof a.notes === 'string' && a.notes.toLowerCase().includes('imported')) {
                 a.notes = '';
+                needsSave = true;
               }
             });
           }
         });
-        saveDatabase(parsed);
-        return parsed as LocalDB;
+        cachedDb = parsed as LocalDB;
+        if (needsSave) {
+          saveDatabase(cachedDb);
+        }
+        return cachedDb;
       }
     } catch (err) {
       console.error('Error reading DB_FILE, re-seeding:', err);
@@ -285,6 +316,7 @@ function loadDatabase(): LocalDB {
     importHistory: [],
   };
 
+  cachedDb = db;
   saveDatabase(db);
   return db;
 }
@@ -304,6 +336,7 @@ function broadcastRealtimeEvent(type: string = 'DATA_UPDATED', payload: any = {}
 
 function saveDatabase(db: LocalDB, eventType: string = 'DATA_UPDATED') {
   try {
+    cachedDb = db;
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
     broadcastRealtimeEvent(eventType);
   } catch (err) {
@@ -765,13 +798,14 @@ async function startServer() {
           incomingDb.airmen = cleanAirmen;
         }
 
-        // Strict deduplication of assignments
+        // Strict deduplication & sanitation of assignments
         if (incomingDb.assignments && typeof incomingDb.assignments === 'object') {
           Object.keys(incomingDb.assignments).forEach((m) => {
             const list = incomingDb.assignments[m] || [];
             const seen = new Set<string>();
             const cleanList: any[] = [];
             list.forEach((asn: any) => {
+              if (isCorruptedAssignmentRecord(asn)) return;
               const airDigits = String(asn.airmanId || '').replace(/\D/g, '');
               const shift = asn.idaShift || asn.shift || 'n';
               const scope = asn.disposalScope || 'ALL';
@@ -975,23 +1009,37 @@ async function startServer() {
         const aDigits = String(a.airmanId || '').replace(/\D/g, '');
         return Boolean(airDigits && aDigits && aDigits === airDigits);
       });
-      const dutyCode = match?.dutyCode || 'ON_PARADE';
-      const isIdac = ['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(dutyCode);
+      const dutyCode = String(match?.dutyCode || 'ON_PARADE').trim() || 'ON_PARADE';
+      const codeUpper = dutyCode.toUpperCase();
+      const isIdac = ['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(codeUpper);
       const isIdacNt = isIdac && (
         String(match?.idaShift || (match as any)?.shift || '').toLowerCase().includes('night') ||
         String(match?.idaShift || (match as any)?.shift || '').toLowerCase().includes('nt') ||
         String(match?.notes || '').toLowerCase().includes('night') ||
         String(match?.notes || '').toLowerCase().includes('nt')
       );
+      const isBaseParade = ['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT'].includes(codeUpper);
+      const isGenuineDuty =
+        ['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'AIRPORT', 'AIRFIELD', 'AIR_FD', 'ESCORT', 'ESC', 'ESCT'].includes(codeUpper) ||
+        codeUpper.startsWith('CUST_') ||
+        isIdac;
       let statusCategory = 'PARADE';
-      if (dutyCode === 'ON_PARADE' || (shift === 'Morning' && isIdacNt)) { 
-        onParade++; 
-        statusCategory = 'PARADE'; 
+      if (isBaseParade || (shift === 'Morning' && isIdacNt)) {
+        onParade++;
+        statusCategory = 'PARADE';
+      } else if (codeUpper === 'LEAVE') {
+        onLeave++; statusCategory = 'LEAVE';
+      } else if (['TDY', 'ATT', 'DETT'].includes(codeUpper)) {
+        tdy++; statusCategory = 'TDY';
+      } else if (codeUpper === 'DUTY_OFF' || codeUpper === 'OFF') {
+        otherOff++; statusCategory = 'OFF';
+      } else if (['BAKE_N_BITE', 'CANTEEN', 'RECEPTION', 'GUARD_OF_HONOUR', 'SICK_REPORT', 'SICK', 'EX_PPGF', 'ED', 'CMH', 'BNS', 'BSH', 'ESSN', 'ADMIN_ORDER', 'CAT_C', 'DRILL_CAT_C', 'CLASS_TRG', 'GAMES', 'GH', 'ABSENT', 'AWL'].includes(codeUpper)) {
+        otherOff++; statusCategory = codeUpper;
+      } else if (isGenuineDuty) {
+        onDuty++; statusCategory = 'DUTY';
+      } else {
+        otherOff++; statusCategory = 'OTHERS';
       }
-      else if (dutyCode === 'LEAVE') { onLeave++; statusCategory = 'LEAVE'; }
-      else if (['TDY', 'ATT', 'DETT'].includes(dutyCode)) { tdy++; statusCategory = 'TDY'; }
-      else if (dutyCode === 'DUTY_OFF') { otherOff++; statusCategory = 'OFF'; }
-      else { onDuty++; statusCategory = 'DUTY'; }
 
       let dutyName = dutyCode === 'ON_PARADE' ? 'On Parade' : dutyCode;
       const isCustomCode = dutyCode.startsWith('CUST_') || dutyCode.startsWith('cust_') || dutyCode.includes('1794394');
@@ -1659,12 +1707,13 @@ async function startServer() {
 
   // 8. AI PDF / Image / Document Duty Data Import Analyzer (Gemini Powered)
   let aiClient: GoogleGenAI | null = null;
-  function getGeminiAI(): GoogleGenAI | null {
+  async function getGeminiAI(): Promise<GoogleGenAI | null> {
     if (!process.env.GEMINI_API_KEY) {
       return null;
     }
     if (!aiClient) {
-      aiClient = new GoogleGenAI({
+      const { GoogleGenAI: GenAIClass } = await import('@google/genai');
+      aiClient = new GenAIClass({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: {
           headers: {
@@ -1830,6 +1879,7 @@ async function startServer() {
   // Extract all text and pages from a PDF buffer using pdf-parse
   async function extractAllPagesFromPdf(buffer: Buffer): Promise<{ totalPages: number; pages: Array<{ pageNumber: number; text: string }>; fullText: string }> {
     try {
+      const { default: pdfParsePkg } = await import('pdf-parse/lib/pdf-parse.js');
       const parsed = await pdfParsePkg(buffer);
       const totalPages = parsed.numpages || 1;
       const pages = [{
@@ -2148,6 +2198,7 @@ async function startServer() {
         try {
           if (file.mime === 'application/pdf') {
             try {
+              const { default: pdfParsePkg } = await import('pdf-parse/lib/pdf-parse.js');
               const pdfData = await pdfParsePkg(buffer);
               combinedText += '\n--- PDF PAGE ---\n' + pdfData.text;
             } catch (pdfErr) {
@@ -2157,10 +2208,12 @@ async function startServer() {
               combinedText += '\n--- PDF PAGE (Heuristic) ---\n' + fullText;
             }
           } else if (file.mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || file.mime.includes('word')) {
+            const { default: mammoth } = await import('mammoth');
             const result = await mammoth.extractRawText({ buffer });
             combinedText += '\n--- DOCX CONTENT ---\n' + result.value;
           } else if (file.mime.startsWith('image/')) {
             console.log("Running Tesseract OCR on image...");
+            const { default: Tesseract } = await import('tesseract.js');
             const { data: { text } } = await Tesseract.recognize(buffer, 'eng');
             combinedText += '\n--- OCR IMAGE CONTENT ---\n' + text;
           } else {
@@ -2216,7 +2269,7 @@ async function startServer() {
       }
 
       try {
-        const ai = getGeminiAI();
+        const ai = await getGeminiAI();
         if (ai && process.env.GEMINI_API_KEY) {
           const prompt = `Extract duty roster assignments from the provided document(s) or text.
 Return a JSON object with a "dates" array. Each date object should have a "date" (YYYY-MM-DD) and an "assignments" array.
@@ -2449,31 +2502,22 @@ ${combinedText.substring(0, 30000)}
 
 // 8.1. Direct Load Official 155 UASU Parade State Roster (01 Jul - 31 Aug)
   app.use((req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
+    if (!req.path.startsWith('/node_modules/.vite/')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
     next();
   });
 
   // Vite middleware in dev or static serving in production
   if (process.env.NODE_ENV !== 'production') {
-    const isWatchDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: false,
-        watch: isWatchDisabled ? null : {
-          ignored: [
-            '**/data/**',
-            '**/*.json',
-            '**/*.db',
-            '**/dist/**',
-            '**/package-lock.json',
-            '**/bun.lock',
-            '**/yarn.lock',
-            '**/node_modules/**',
-          ],
-        },
+        ws: false,
+        watch: null,
       },
       appType: 'spa',
     });

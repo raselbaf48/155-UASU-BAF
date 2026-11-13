@@ -608,7 +608,7 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
                           {effectiveCount} Duties
                         </span>
                         <div className="text-[10px] text-slate-400 font-medium">
-                          GD:{s.totalGD} | BTF:{s.totalBTF} | NTF:{s.totalNTF} | HTF:{s.totalHalishahar} | IDAC:{s.totalIDAC || 0}
+                          SY:{s.totalGD} | BTF:{s.totalBTF} | NTF:{s.totalNTF} | HTF:{s.totalHalishahar} | IDAC:{s.totalIDAC || 0}
                         </div>
                       </div>
                     </div>

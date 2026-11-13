@@ -21,7 +21,6 @@ import {
  Plus,
  Edit3,
  Eye,
- EyeOff,
  Filter,
  UserMinus,
  PenTool,
@@ -59,6 +58,7 @@ import {
 import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
 import { saveCustomDisposal, getSavedCustomDisposals, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 import { formatRank, formatAirmanName } from '../utils/rankFormatter';
+import { getWeekdayShort } from '../utils/holidayUtils';
 
 interface ParadeStateFormattedViewProps {
  role?: UserRole;
@@ -136,7 +136,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  // Internal Print Modal state
  const [isInternalPrintOpen, setIsInternalPrintOpen] = useState<boolean>(false);
-  const [hideEmptyColumns, setHideEmptyColumns] = useState<boolean>(true);
+ const hideEmptyColumns = true;
 
  // Signature Config Modal state
  const [showSignatureModal, setShowSignatureModal] = useState<boolean>(false);
@@ -630,7 +630,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  else if (noteUpper.includes('AIR') || noteUpper.includes('AIRPORT')) resolvedCode = 'AIRPORT';
  else if (noteUpper.includes('IDAC')) resolvedCode = 'IDAC';
  else if (noteUpper.includes('CANTEEN')) resolvedCode = 'CANTEEN';
- else resolvedCode = 'GD';
+ else if (/\b(GD|SY|SECURITY|GUARD)\b/.test(noteUpper)) resolvedCode = 'GD';
+ else resolvedCode = 'OTHERS';
  }
 
  const isStandardCat = [
@@ -690,7 +691,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const isCustom = activeCategory === 'OTHERS';
  let effectiveDutyCode = isCustom ? 'OTHERS' : activeCategory;
  if (effectiveDutyCode === 'DUTY' || effectiveDutyCode === 'DUTY_ON') {
- effectiveDutyCode = 'GD';
+ effectiveDutyCode = 'OTHERS';
  }
  const effectiveNotes = isCustom ? (editDisposalCustomTitle.trim() || 'Custom Disposal') : undefined;
 
@@ -982,7 +983,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  absentCount++;
  } else if (codeUpper === 'CANTEEN' || statusCategory === 'CANTEEN') {
  if (isPtDocument) { koReceptionCount++; } else { canteenCount++; }
- } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'DUTY_OFF'].includes(codeUpper) || statusCategory === 'DUTY' || statusCategory === 'OFF') {
+ } else if (['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'DUTY_OFF', 'ESCORT', 'ESC', 'ESCT'].includes(codeUpper) || codeUpper.startsWith('CUST_') || codeUpper.includes('1794394') || statusCategory === 'OFF') {
  guardDutyCount++;
  } else {
  othersCount++;
@@ -1128,7 +1129,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
        } else if (codeUpper === 'DUTY_OFF' || statusCategory === 'OFF') {
  const offName = formatDutyOffShortName(item.previousDutyCode, item.previousDutyName, item.dutyName || notes);
  dutyOffList.push({ airman, note: offName });
- } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
+ } else if ((['GD', 'SY', 'SY_DUTY', 'SECURITY', 'GUARD_DUTY', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD', 'ESCORT', 'ESC', 'ESCT'].includes(codeUpper) || codeUpper.startsWith('CUST_') || codeUpper.includes('1794394') || statusCategory === 'DUTY') && !['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT', ''].includes(codeUpper)) {
  const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, item.dutyName);
  dutyOnList.push({ airman, note: dutyDisplay });
  } else {
@@ -1198,9 +1199,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const isDutyOff = dutyCode === 'DUTY_OFF';
  let noteText = item.note && !item.note.toLowerCase().includes('imported') ? item.note : '';
  if (isDutyOn && (noteText.toUpperCase() === 'DUTY' || noteText.toUpperCase() === 'DUTY_ON' || !noteText)) {
- noteText = 'GD';
+ noteText = 'Duty';
  }
- const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'GD') : dutyCode;
+ const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'OTHERS') : dutyCode;
 
  return (
  <li
@@ -1236,6 +1237,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  </ol>
  );
  };
+
+ const singleWeekday = getWeekdayShort(fromDate);
 
  return (
  <div className="space-y-6">
@@ -1284,7 +1287,6 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
         </div>
 
  <div className="flex flex-wrap items-center xl:justify-end gap-2.5">
- {isPtDocument ? null : (
  <>
  {/* Quick Date Presets (Hidden on Others State as requested) */}
  {!isOthersDocument && (
@@ -1322,6 +1324,12 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="flex items-center gap-2">
 
  {dateMode === 'single' ? (
+ <div className="inline-flex items-center w-fit shrink-0 gap-1.5">
+ {singleWeekday && (
+ <span className="px-2 py-1 rounded-lg text-xs font-black border shrink-0 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-600">
+ {singleWeekday}
+ </span>
+ )}
  <div className="inline-flex items-center w-fit shrink-0 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold gap-1">
  <span className="text-slate-500 font-semibold mr-0.5 shrink-0">Dt:</span>
  <DateNavigator
@@ -1334,6 +1342,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  }}
  className="bg-transparent text-slate-900 dark:text-white print:text-black font-black outline-none cursor-pointer"
  />
+ </div>
  </div>
  ) : (
  <div className="inline-flex items-center w-fit shrink-0 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-2">
@@ -1418,20 +1427,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  )}
  
 
-          
-          {isMultiDay && (
-            <button
-              onClick={() => setHideEmptyColumns(!hideEmptyColumns)}
-              className={"flex items-center space-x-1.5 px-4 py-2 text-sm font-black rounded-xl shadow-lg transition-all cursor-pointer ml-4 " + (hideEmptyColumns ? "bg-amber-500 hover:bg-amber-400 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600")}
-              title="Hide Empty Columns"
-            >
-              <EyeOff className="w-4 h-4" />
-              <span>{hideEmptyColumns ? 'Show Empty Cols' : 'Hide Empty Cols'}</span>
-            </button>
-          )}
-
           </>
-            )}
           {/* Official Export / Print Button */}
           <button
             onClick={handleExportOrPrint}
@@ -1720,7 +1716,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  155 UASU BAF {selectedFlight !== 'Overall' ? `(${selectedFlight.toUpperCase()} FLT)` : ''}
  </h2>
  </div>
- <div className="text-right font-normal text-slate-900 dark:text-white print:text-black pr-1 text-xs mt-1">
+ <div className="text-right font-normal pr-1 text-xs mt-1 text-slate-900 dark:text-white print:text-black">
  Date: {formatDateShort(fromDate)}
  </div>
  </div>
@@ -2072,7 +2068,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  {/* Add Disposal Modal */}
  {showAddDisposalModal && (
- <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
+ <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:pt-8 overflow-y-auto bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-white print:border-black shadow-2xl max-w-xl w-full p-6 space-y-5 relative overflow-hidden">
  {/* Modal Header */}
  <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 dark:border-white print:border-black pb-4">
@@ -2295,7 +2291,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  return { isOnParade: false, label: 'Absent', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
  }
  if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF') {
- return { isOnParade: false, label: dutyName || notes || 'GD Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'GD Off' };
+ return { isOnParade: false, label: dutyName || notes || 'SY Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'SY Off' };
  }
  if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
  return { isOnParade: false, label: notes || dutyCode || 'On Duty', dutyCode: dutyCode || 'DUTY_ON', notes, dutyName: dutyName || 'On Duty' };
@@ -2467,7 +2463,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  {/* Edit / Change Disposal Modal */}
  {editDisposalModal && (
- <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn print:hidden">
+ <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:pt-8 overflow-y-auto bg-slate-900/60 backdrop-blur-xs animate-fadeIn print:hidden">
  <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 dark:border-white print:border-black space-y-4">
  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 dark:border-white print:border-black pb-3">
  <div>

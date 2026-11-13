@@ -200,14 +200,18 @@ export function formatDutyOnShortName(
     notesLower.includes('base sec') ||
     notesLower.includes('guard duty') ||
     notesLower.includes('sy duty') ||
+    notesLower.includes('sy on') ||
     notesLower.includes('security duty') ||
-    notesLower.includes('gd') ||
+    /\bgd\b/i.test(notesLower) ||
+    /\bsy\b/i.test(notesLower) ||
     nameLower.includes('security') ||
-    nameLower.includes('guard') ||
-    nameLower.includes('gd') ||
-    nameLower.includes('sy')
+    nameLower.includes('guard duty') ||
+    /\bgd\b/i.test(nameLower) ||
+    /\bsy\b/i.test(nameLower) ||
+    nameLower.includes('sy duty') ||
+    nameLower.includes('sy on')
   ) {
-    return 'Sy Duty';
+    return 'SY';
   }
 
   // 12. Custom duty code resolution (handles CUST_..., timestamp codes, custom duties)
@@ -247,8 +251,9 @@ export function formatDutyOnShortName(
     return code.includes('1794394') ? 'Esct Duty' : 'Special Duty';
   }
 
-  // 15. Any remaining generic duty code falls back to Sy Duty (Security Duty in 155 UASU BAF)
-  return (code && !isGenericDuty(code)) ? code : 'Sy Duty';
+  // 15. Never silently fall back baseline or generic codes to Security Duty
+  const isBaseline = ['ON_PARADE', 'PT', 'PT_PARADE', 'P', 'PRESENT'].includes(code);
+  return (code && !isGenericDuty(code) && !isBaseline) ? code : 'Duty';
 }
 
 export function formatDutyOffShortName(
@@ -282,6 +287,7 @@ export function formatDutyOffShortName(
   ) {
     return 'Esct Off';
   }
-  if (shortOn === 'Sy Duty') return 'Sy Off';
+  if (shortOn === 'SY' || shortOn === 'Sy Duty' || shortOn === 'GD') return 'SY Off';
+  if (!shortOn || shortOn === 'Duty') return 'Duty Off';
   return `${shortOn} Off`;
 }

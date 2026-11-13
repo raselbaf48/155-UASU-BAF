@@ -149,6 +149,7 @@ export interface PersonnelStatusItem {
   disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT';
   notes?: string;
   dutyName?: string;
+  previousDutyCode?: string;
   previousDutyName?: string;
   statusCategory: DutyCategoryCode | 'ON_PARADE' | 'ON_DUTY' | 'ON_LEAVE' | 'TDY' | 'DUTY_OFF' | 'BAKE_N_BITE' | 'PARADE' | 'DUTY' | 'LEAVE' | 'OFF';
 }

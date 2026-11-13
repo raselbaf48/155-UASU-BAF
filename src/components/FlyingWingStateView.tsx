@@ -50,7 +50,7 @@ const DISPOSAL_COLUMNS = [
   'Aft Flg',
   'Ni Flg',
   'Ni Duty',
-  'Base Security (GD)',
+  'Base Security (SY)',
   'Base Taskforce (BTF)',
   'Airfield Duty',
   'Off Duty',
@@ -118,7 +118,7 @@ export function FlyingWingStateView({
               'ED': d.edExPpgf || 0,
               'CMH': d.cmhBnsBsh || 0,
               'Office Duty': d.officeDuty || 0,
-              'Base Security (GD)': d.baseAirfieldDuty || 0,
+              'Base Security (SY)': d.baseAirfieldDuty || 0,
               'Driving': d.driving || 0
             }
           };
@@ -198,7 +198,7 @@ export function FlyingWingStateView({
         const offVal = uasuStats.office || uasuStats.officeDuty;
         if (offVal) autoDisposals['Office Duty'] = offVal;
         const baseAirVal = uasuStats.baseAirfield || uasuStats.baseAirfieldDuty;
-        if (baseAirVal) autoDisposals['Base Security (GD)'] = baseAirVal;
+        if (baseAirVal) autoDisposals['Base Security (SY)'] = baseAirVal;
         if (uasuStats.driving) autoDisposals['Driving'] = uasuStats.driving;
 
         return {
@@ -502,7 +502,7 @@ export function FlyingWingStateView({
                           const offVal = uasuStats.office || uasuStats.officeDuty;
                           if (offVal) vals['Office Duty'] = offVal;
                           const baseAirVal = uasuStats.baseAirfield || uasuStats.baseAirfieldDuty;
-                          if (baseAirVal) vals['Base Security (GD)'] = baseAirVal;
+                          if (baseAirVal) vals['Base Security (SY)'] = baseAirVal;
                           if (uasuStats.driving) vals['Driving'] = uasuStats.driving;
                         }
                         setFormDisposalValues(vals);

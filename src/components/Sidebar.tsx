@@ -24,7 +24,6 @@ import {
   PanelLeft,
   Sliders,
   Settings, 
-  Moon,
   KeyRound,
   Lock,
   Unlock,
@@ -45,7 +44,6 @@ export type SidebarTab =
   | 'parade-state'
   | 'pt-state'
   | 'others-state'
-  | 'night-count-state'
   | 'biodata-register'
   | 'leave-register'
   | 'tdy-register'
@@ -334,7 +332,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {(isCollapsed || openSections.schedule) && (
               <div className="mt-2 space-y-2 sm:space-y-1">
                 {renderNavButton('ida-center', <Shield className="w-4 h-4 shrink-0" />, 'IDA Center Duty', 'IDA Center Duty (Standby & Shifts)', undefined, isMobileDrawer)}
-                {renderNavButton('night-count-state', <Moon className="w-4 h-4 shrink-0" />, 'Night Count State', 'Night Count State & Quotas', undefined, isMobileDrawer)}
                 {renderNavButton('duty-roster', <FileText className="w-4 h-4 shrink-0" />, 'Duty Roster', 'Duty Roster Period & Export', undefined, isMobileDrawer)}
               </div>
             )}

@@ -3,17 +3,76 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, Suspense } from 'react';
-import { Sidebar, SidebarTab } from './components/Sidebar';
+import React, { useState, useEffect, Suspense, lazy, Component, ReactNode } from 'react';
+import type { SidebarTab } from './components/Sidebar';
+import { Sidebar } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
+import { DashboardParadeState } from './components/DashboardParadeState';
+import { ParadeStateFormattedView } from './components/ParadeStateFormattedView';
 import { updatePresence } from './services/presenceService';
 import { getAppConfig, saveAppConfig, isFeatureActive, AppConfig } from './utils/appConfig';
 import { UserLoginGate } from './components/UserLoginGate';
 
-// Statically loaded views & modals so all tabs and options render instantly (0ms) without any loading spinners
-import { DashboardParadeState } from './components/DashboardParadeState';
-import { ParadeStateFormattedView } from './components/ParadeStateFormattedView';
-import { NightCountStateView } from './components/NightCountStateView';
+// Resilient dynamic import helper with retry to avoid stuck loading spinners on transient chunk fetch errors
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importer: () => Promise<{ default: T }>,
+  retries = 2
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await importer();
+      } catch (err) {
+        lastError = err;
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        }
+      }
+    }
+    throw lastError;
+  });
+}
+
+class TabErrorBoundary extends Component<{ children: ReactNode; tabKey: string }, { hasError: boolean }> {
+  declare props: { children: ReactNode; tabKey: string };
+  declare state: { hasError: boolean };
+  declare setState: (nextState: { hasError: boolean }) => void;
+
+  constructor(props: { children: ReactNode; tabKey: string }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps: { tabKey: string }) {
+    if (prevProps.tabKey !== this.props.tabKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-[40vh] flex flex-col items-center justify-center text-slate-400 gap-3 p-6 text-center">
+          <p className="text-sm font-bold text-slate-300">Failed to load view.</p>
+          <button
+            type="button"
+            onClick={() => this.setState({ hasError: false })}
+            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 import { NominalRoll } from './components/NominalRoll';
 import { FlightsMiniView } from './components/FlightsMiniView';
 import { LeaveRegisterView } from './components/LeaveRegisterView';
@@ -25,13 +84,15 @@ import { DutyRosterPeriodView } from './components/DutyRosterPeriodView';
 import { DutyRatioMatrixView } from './components/DutyRatioMatrixViewV2';
 import { DutyAnalytics } from './components/DutyAnalytics';
 import { DutyConflictMonitor } from './components/DutyConflictMonitor';
-import { AirmanProfileModal } from './components/AirmanProfileModal';
-import { AddEditAirmanModal } from './components/AddEditAirmanModal';
-import { PrintableParadeStateModal } from './components/PrintableParadeStateModal';
-import { PdfDutyImportModal } from './components/PdfDutyImportModal';
-import { SettingsModal } from './components/SettingsModal';
-import { AdminPasscodeModal } from './components/AdminPasscodeModal';
-import { AppUpdateModal } from './components/AppUpdateModal';
+const AirmanProfileModal = lazyWithRetry(() => import('./components/AirmanProfileModal').then((m) => ({ default: m.AirmanProfileModal })));
+const AddEditAirmanModal = lazyWithRetry(() => import('./components/AddEditAirmanModal').then((m) => ({ default: m.AddEditAirmanModal })));
+const PdfDutyImportModal = lazyWithRetry(() => import('./components/PdfDutyImportModal').then((m) => ({ default: m.PdfDutyImportModal })));
+const SettingsModal = lazyWithRetry(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
+const AdminPasscodeModal = lazyWithRetry(() => import('./components/AdminPasscodeModal').then((m) => ({ default: m.AdminPasscodeModal })));
+const AppUpdateModal = lazyWithRetry(() => import('./components/AppUpdateModal').then((m) => ({ default: m.AppUpdateModal })));
+const StandaloneBackupPage = lazyWithRetry(() => import('./components/StandaloneBackupPage').then((m) => ({ default: m.StandaloneBackupPage })));
+const FirebaseQuotaPopupModal = lazyWithRetry(() => import('./components/FirebaseQuotaPopupModal').then((m) => ({ default: m.FirebaseQuotaPopupModal })));
+
 import {
   checkForAppUpdate,
   AppVersionRecord,
@@ -40,26 +101,27 @@ import {
   isRunningInApk,
 } from './services/appUpdateService';
 import { Airman, FlightName, ParadeShift, UserRole, ThemePreference } from './types';
-import { motion, AnimatePresence } from 'motion/react';
 import { INITIAL_AIRMEN } from './data/initialAirmen';
 import { Logo155UASU } from './components/Logo155UASU';
-import { Shield, AlertCircle, X } from 'lucide-react';
+import { Shield, AlertCircle, X, Loader2 } from 'lucide-react';
 import { getCurrentUserSession, clearUserSession, UserSession } from './utils/authSession';
 import { localDb } from './services/localDatabase';
 import { isFirebaseConfigured } from './firebase';
 import { pushCanteenMembersToFirebase } from './services/firebaseFirestoreService';
 import { setLastUsedPortal } from './services/portalPreferenceService';
 import { initGoogleDriveAuth } from './services/googleDriveService';
-import { StandaloneBackupPage } from './components/StandaloneBackupPage';
-import { FirebaseQuotaPopupModal } from './components/FirebaseQuotaPopupModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('overview');
   const [role, setRole] = useState<UserRole>(() => {
-    const saved = sessionStorage.getItem('baf_user_role');
-    if (saved === 'OWNER') return 'OWNER';
-    if (saved === 'SUPER_ADMIN') return 'SUPER_ADMIN';
-    return saved === 'ADMIN' ? 'ADMIN' : 'USER';
+    try {
+      const saved = sessionStorage.getItem('baf_user_role');
+      if (saved === 'OWNER') return 'OWNER';
+      if (saved === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+      return saved === 'ADMIN' ? 'ADMIN' : 'USER';
+    } catch {
+      return 'USER';
+    }
   });
   const [userSession, setUserSession] = useState<UserSession | null>(() => getCurrentUserSession());
   const [justLoggedIn, setJustLoggedIn] = useState<boolean>(false);
@@ -267,8 +329,10 @@ export default function App() {
   
   // Theme Preference State (Light / Dark / System)
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
-    const saved = localStorage.getItem('baf_theme_pref');
-    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    try {
+      const saved = localStorage.getItem('baf_theme_pref');
+      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    } catch {}
     return 'dark';
   });
   const [darkMode, setDarkMode] = useState<boolean>(true);
@@ -276,7 +340,9 @@ export default function App() {
 
   // Apply Theme Preference to document and darkMode state
   useEffect(() => {
-    localStorage.setItem('baf_theme_pref', themePreference);
+    try {
+      localStorage.setItem('baf_theme_pref', themePreference);
+    } catch {}
 
     const applyTheme = () => {
       if (themePreference === 'dark') {
@@ -607,9 +673,18 @@ return () => mediaQuery.removeEventListener('change', listener);
   // Standalone Full-Page Views (Offline Local Backup & Restore Center)
   if (standaloneView === 'backup') {
     return (
-      <StandaloneBackupPage
-        onBack={() => setStandaloneView(null)}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-950 text-slate-300 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+            <span className="text-xs font-bold uppercase tracking-widest">Loading Backup Center...</span>
+          </div>
+        }
+      >
+        <StandaloneBackupPage
+          onBack={() => setStandaloneView(null)}
+        />
+      </Suspense>
     );
   }
 
@@ -743,17 +818,6 @@ return () => mediaQuery.removeEventListener('change', listener);
             onOpenImportModal={() => setIsPdfImportModalOpen(true)}
           />
         );
-      case "night-count-state":
-        return (
-          <NightCountStateView
-            role={role}
-            userFlight={userSession?.flightName}
-            airmen={airmen}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-          />
-        );
       case "nominal":
         return (
           <NominalRoll
@@ -873,80 +937,77 @@ return () => mediaQuery.removeEventListener('change', listener);
 
   return (
     <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      <FirebaseQuotaPopupModal checkOnMount={justLoggedIn} />
+      <Suspense fallback={null}>
+        <FirebaseQuotaPopupModal checkOnMount={justLoggedIn} />
+      </Suspense>
       {renderNoticeModal()}
       {/* Left Sidebar Navigation */}
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        role={role}
-              userFlight={userSession?.flightName}
-        conflictCount={conflictCount}
-        collapsed={sidebarCollapsed}
-        setCollapsed={setSidebarCollapsed}
-        mobileOpen={mobileSidebarOpen}
-        setMobileOpen={setMobileSidebarOpen}
-        airmenCount={airmen.filter(a => a.active !== false).length}
-        userSession={userSession}
-        onOpenImportModal={() => {
-          setMobileSidebarOpen(false);
-          setIsPdfImportModalOpen(true);
-        }}
-        onLogoutUser={handleUserLogout}
-        onOpenSettings={() => {
-          setMobileSidebarOpen(false);
-          setIsSettingsModalOpen(true);
-        }}
-        onOpenAdminLogin={() => {
-          setMobileSidebarOpen(false);
-          setIsAdminLoginModalOpen(true);
-        }}
-                onLogoutAdmin={() => {
-            handleRoleChange('USER');
-            if (userSession) {
-               const updatedSession = { ...userSession, assignedRole: 'USER' };
-               setUserSession(updatedSession);
-               sessionStorage.setItem('baf_user_session', JSON.stringify(updatedSession));
-            }
+      <Suspense fallback={null}>
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          role={role}
+                userFlight={userSession?.flightName}
+          conflictCount={conflictCount}
+          collapsed={sidebarCollapsed}
+          setCollapsed={setSidebarCollapsed}
+          mobileOpen={mobileSidebarOpen}
+          setMobileOpen={setMobileSidebarOpen}
+          airmenCount={airmen.filter(a => a.active !== false).length}
+          userSession={userSession}
+          onOpenImportModal={() => {
+            setMobileSidebarOpen(false);
+            setIsPdfImportModalOpen(true);
           }}
-      />
+          onLogoutUser={handleUserLogout}
+          onOpenSettings={() => {
+            setMobileSidebarOpen(false);
+            setIsSettingsModalOpen(true);
+          }}
+          onOpenAdminLogin={() => {
+            setMobileSidebarOpen(false);
+            setIsAdminLoginModalOpen(true);
+          }}
+                  onLogoutAdmin={() => {
+              handleRoleChange('USER');
+              if (userSession) {
+                 const updatedSession = { ...userSession, assignedRole: 'USER' };
+                 setUserSession(updatedSession);
+                 sessionStorage.setItem('baf_user_session', JSON.stringify(updatedSession));
+              }
+            }}
+        />
+      </Suspense>
 
       {/* Right Content Wrapper */}
       <div className={`flex flex-col min-h-screen transition-[padding] duration-200 ease-out print:min-h-0 print:pl-0 print:p-0 print:bg-white ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         {/* Top Header Bar */}
-        <TopHeader
-          activeTab={activeTab}
-          onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-          role={role}
-              userFlight={userSession?.flightName}
-          userSession={userSession}
-                              onLogoutUser={handleUserLogout}
-          onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
-          onLogoutAdmin={() => {
-            handleRoleChange('USER');
-            if (userSession) {
-               const updatedSession = { ...userSession, assignedRole: 'USER' };
-               setUserSession(updatedSession);
-               sessionStorage.setItem('baf_user_session', JSON.stringify(updatedSession));
-            }
-          }}
-        />
+        <Suspense fallback={<div className="h-16 border-b border-slate-800/60 bg-slate-900/40" />}>
+          <TopHeader
+            activeTab={activeTab}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+            role={role}
+                userFlight={userSession?.flightName}
+            userSession={userSession}
+                                onLogoutUser={handleUserLogout}
+            onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
+            onLogoutAdmin={() => {
+              handleRoleChange('USER');
+              if (userSession) {
+                 const updatedSession = { ...userSession, assignedRole: 'USER' };
+                 setUserSession(updatedSession);
+                 sessionStorage.setItem('baf_user_session', JSON.stringify(updatedSession));
+              }
+            }}
+          />
+        </Suspense>
 
         {/* Main View Area (Opens on Right Side based on clicked tab) */}
         <main className={`flex-1 ${activeTab === 'duty-ratio' ? 'px-1 sm:px-2 md:px-3 py-3 max-w-none' : activeTab === 'register' ? 'px-2 sm:px-4 lg:px-6 max-w-none' : 'px-4 sm:px-6 lg:px-8 max-w-[1600px]'} py-6 w-full mx-auto print:p-0 print:m-0 print:max-w-none print:w-full`}>
-          <div className="w-full relative">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0.85 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.12, ease: "easeOut" }}
-                className="w-full print:filter-none print:opacity-100 print:transform-none"
-              >
-                {renderActiveTabContent(activeTab)}
-              </motion.div>
-            </AnimatePresence>
+          <div className="w-full relative" key={activeTab}>
+            <TabErrorBoundary tabKey={activeTab}>
+              {renderActiveTabContent(activeTab)}
+            </TabErrorBoundary>
           </div>
         </main>
 
@@ -966,6 +1027,7 @@ return () => mediaQuery.removeEventListener('change', listener);
       </div>
 
       {/* Modals */}
+      <Suspense fallback={null}>
         {selectedAirmanProfile && (
           <AirmanProfileModal
             airman={selectedAirmanProfile.airman}
@@ -999,56 +1061,62 @@ return () => mediaQuery.removeEventListener('change', listener);
         )}
 
         {/* AI PDF / Image Duty Data Import Modal */}
-        <PdfDutyImportModal
-          isOpen={isPdfImportModalOpen}
-          onClose={() => setIsPdfImportModalOpen(false)}
-          airmen={airmen}
-          onImportSuccess={(dates) => {
-            if (dates && dates.length > 0) {
-              setSelectedDate(dates[0]);
-              window.dispatchEvent(new CustomEvent('baf_state_updated', { detail: { date: dates[0] } }));
-            } else {
-              window.dispatchEvent(new CustomEvent('baf_state_updated'));
-            }
-          }}
-          onNavigateToTab={(tab, date) => {
-            if (date) setSelectedDate(date);
-            setActiveTab(tab);
-          }}
-        />
+        {isPdfImportModalOpen && (
+          <PdfDutyImportModal
+            isOpen={isPdfImportModalOpen}
+            onClose={() => setIsPdfImportModalOpen(false)}
+            airmen={airmen}
+            onImportSuccess={(dates) => {
+              if (dates && dates.length > 0) {
+                setSelectedDate(dates[0]);
+                window.dispatchEvent(new CustomEvent('baf_state_updated', { detail: { date: dates[0] } }));
+              } else {
+                window.dispatchEvent(new CustomEvent('baf_state_updated'));
+              }
+            }}
+            onNavigateToTab={(tab, date) => {
+              if (date) setSelectedDate(date);
+              setActiveTab(tab);
+            }}
+          />
+        )}
 
         {/* System Settings Modal (Theme, Passcode, Import History, Backup) */}
-        <AdminPasscodeModal
-          isOpen={isAdminLoginModalOpen}
-          airmen={airmen}
-          onClose={() => setIsAdminLoginModalOpen(false)}
-          onSuccess={(newRole) => {
-            handleRoleChange(newRole);
-            if (userSession) {
-               const updatedSession = { ...userSession, assignedRole: newRole };
-               setUserSession(updatedSession);
-               sessionStorage.setItem('baf_user_session', JSON.stringify(updatedSession));
-            }
-            setIsAdminLoginModalOpen(false);
-          }}
-          assignedRole={userSession?.assignedRole || 'USER'}
-          bdNo={userSession?.bdNo}
-        />
+        {isAdminLoginModalOpen && (
+          <AdminPasscodeModal
+            isOpen={isAdminLoginModalOpen}
+            airmen={airmen}
+            onClose={() => setIsAdminLoginModalOpen(false)}
+            onSuccess={(newRole) => {
+              handleRoleChange(newRole);
+              if (userSession) {
+                 const updatedSession = { ...userSession, assignedRole: newRole };
+                 setUserSession(updatedSession);
+                 sessionStorage.setItem('baf_user_session', JSON.stringify(updatedSession));
+              }
+              setIsAdminLoginModalOpen(false);
+            }}
+            assignedRole={userSession?.assignedRole || 'USER'}
+            bdNo={userSession?.bdNo}
+          />
+        )}
 
-        <SettingsModal
-          isOpen={isSettingsModalOpen}
-          onClose={() => setIsSettingsModalOpen(false)}
-          role={role}
-          userFlight={userSession?.flightName}
-          nominalAirmen={airmen}
-          currentTheme={themePreference}
-          onThemeChange={(newTheme) => setThemePreference(newTheme)}
-          onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
-          onRosterUpdated={() => {
-            fetchAirmen();
-            window.dispatchEvent(new CustomEvent('baf_state_updated'));
-          }}
-        />
+        {isSettingsModalOpen && (
+          <SettingsModal
+            isOpen={isSettingsModalOpen}
+            onClose={() => setIsSettingsModalOpen(false)}
+            role={role}
+            userFlight={userSession?.flightName}
+            nominalAirmen={airmen}
+            currentTheme={themePreference}
+            onThemeChange={(newTheme) => setThemePreference(newTheme)}
+            onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
+            onRosterUpdated={() => {
+              fetchAirmen();
+              window.dispatchEvent(new CustomEvent('baf_state_updated'));
+            }}
+          />
+        )}
 
         {/* Capacitor In-App Update Modal (Rendered ONLY in APK) */}
         {isRunningInApk() && (
@@ -1060,6 +1128,7 @@ return () => mediaQuery.removeEventListener('change', listener);
             currentVersionName={appVersionInfo.versionName}
           />
         )}
+      </Suspense>
     </div>
   );
 }

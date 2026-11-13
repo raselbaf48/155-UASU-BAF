@@ -140,7 +140,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const [showDisposalDropdown, setShowDisposalDropdown] = useState(false);
  const [isEditingDisposals, setIsEditingDisposals] = useState(false);
 
- const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"OTHERS","customTitle":"U/C","label":"U/C"},{"code":"OTHERS","customTitle":"U/Board","label":"U/Board"},{"code":"OFFICE","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft Flg","label":"Aft Flg"},{"code":"OTHERS","customTitle":"Ni Flg","label":"Ni Flg"},{"code":"OTHERS","customTitle":"Ni Duty","label":"Ni Duty"},{"code":"GD","label":"Base Security (GD)"},{"code":"BTF","label":"Base Taskforce (BTF)"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
+ const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"OTHERS","customTitle":"U/C","label":"U/C"},{"code":"OTHERS","customTitle":"U/Board","label":"U/Board"},{"code":"OFFICE","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft Flg","label":"Aft Flg"},{"code":"OTHERS","customTitle":"Ni Flg","label":"Ni Flg"},{"code":"OTHERS","customTitle":"Ni Duty","label":"Ni Duty"},{"code":"GD","label":"Base Security (SY)"},{"code":"BTF","label":"Base Taskforce (BTF)"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
 
  const handleAddDisposalOption = (opt: any) => {
  if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -544,7 +544,8 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  else if (noteUpper.includes('AIR') || noteUpper.includes('AIRPORT')) resolvedCode = 'AIRPORT';
  else if (noteUpper.includes('IDAC')) resolvedCode = 'IDAC';
  else if (noteUpper.includes('CANTEEN')) resolvedCode = 'CANTEEN';
- else resolvedCode = 'GD';
+ else if (/\b(GD|SY|SECURITY|GUARD)\b/.test(noteUpper)) resolvedCode = 'GD';
+ else resolvedCode = 'OTHERS';
  }
 
  const isStandardCat = [
@@ -604,7 +605,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const isCustom = activeCategory === 'OTHERS';
  let effectiveDutyCode = isCustom ? 'OTHERS' : activeCategory;
  if (effectiveDutyCode === 'DUTY' || effectiveDutyCode === 'DUTY_ON') {
- effectiveDutyCode = 'GD';
+ effectiveDutyCode = 'OTHERS';
  }
  const effectiveNotes = isCustom ? (editDisposalCustomTitle.trim() || 'Custom Disposal') : undefined;
 
@@ -943,9 +944,9 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const isDutyOff = dutyCode === 'DUTY_OFF';
  let noteText = item.note && !item.note.toLowerCase().includes('imported') ? item.note : '';
  if (isDutyOn && (noteText.toUpperCase() === 'DUTY' || noteText.toUpperCase() === 'DUTY_ON' || !noteText)) {
- noteText = 'GD';
+ noteText = 'Duty';
  }
- const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'GD') : dutyCode;
+ const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'OTHERS') : dutyCode;
 
  return (
  <li
@@ -1854,7 +1855,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  return { isOnParade: false, label: 'Absent', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
  }
  if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF') {
- return { isOnParade: false, label: dutyName || notes || 'GD Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'GD Off' };
+ return { isOnParade: false, label: dutyName || notes || 'SY Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'SY Off' };
  }
  if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
  return { isOnParade: false, label: notes || dutyCode || 'On Duty', dutyCode: dutyCode || 'DUTY_ON', notes, dutyName: dutyName || 'On Duty' };
